@@ -1,0 +1,118 @@
+import { test, expect, type Page } from '@playwright/test';
+import JSZip from 'jszip';
+import { mkdir, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { verifyEvidence } from '../shared/evidence';
+
+// Synthetic responses test screen behavior only. The separate live spec calls OpenAI.
+async function word(text: string) {
+  const escaped = text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${escaped}</w:t></w:r></w:p></w:body></w:document>`);
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+const docxType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+async function simulateActions(page: Page) {
+  let extractionFailed = false;
+  await page.routeWebSocket(/\/sync(?:\?|$)/, socket => {
+    socket.onMessage(message => {
+      const request = JSON.parse(message.toString());
+      if (request.type !== 'Action') return;
+      let result: unknown;
+      if (request.udfPath === 'assessment:setup') result = { configured: true, model: 'synthetic-test-response' };
+      else if (request.udfPath === 'assessment:extractRequirements') {
+        if (!extractionFailed) {
+          extractionFailed = true;
+          socket.send(JSON.stringify({ type: 'ActionResponse', requestId: request.requestId, success: false, result: 'Synthetic billing error', errorData: 'Synthetic test: OpenAI usage limit. Try again.', logLines: [] }));
+          return;
+        }
+        result = [
+          { id: 'sql', text: 'SQL experience', mustHave: true, sourceQuote: 'SQL experience' },
+          { id: 'python', text: 'Python experience', mustHave: false, sourceQuote: 'Python experience' },
+          { id: 'communication', text: 'Verify communication in a call', mustHave: false, sourceQuote: null },
+        ];
+      } else if (request.udfPath === 'assessment:assessCandidate') {
+        const { requirements, cvText } = request.args[0];
+        result = { model: 'synthetic-test-response', evidence: verifyEvidence(requirements, cvText, [
+          { requirementId: 'sql', status: 'found', quotes: ['Built monthly reports with SQL at Example Company.'], explanation: 'Synthetic test interpretation: the CV claims SQL reporting work.', question: 'Which reports did you build?' },
+          { requirementId: 'python', status: 'not_found', quotes: [], explanation: '', question: 'Have you used Python?' },
+          { requirementId: 'communication', status: 'needs_checking', quotes: [], explanation: 'Communication needs a recruiter call.', question: 'Walk me through a recent project.' },
+        ]) };
+      } else throw new Error('Unexpected action in the simulated screen test.');
+      socket.send(JSON.stringify({ type: 'ActionResponse', requestId: request.requestId, success: true, result, logLines: [] }));
+    });
+  });
+}
+
+test('review screen handles errors, evidence, highlights and requirement edits using synthetic responses', async ({ page }) => {
+  await simulateActions(page);
+  await page.goto('/');
+  await page.getByLabel('Choose job description').setInputFiles({ name: 'synthetic-jd.docx', mimeType: docxType, buffer: await word('Backend role. Required: SQL experience. Desirable: Python experience. Communication must be checked in a recruiter call.') });
+  await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Synthetic test: OpenAI usage limit');
+  await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
+  const cv = 'Example Applicant. ' + 'Additional synthetic CV content. '.repeat(45) + 'Built monthly reports with SQL at Example Company. No other claims are made in this synthetic document.';
+  await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'synthetic-cv.docx', mimeType: docxType, buffer: await word(cv) });
+  await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toBeVisible();
+  await expect(page.getByText('Evidence found', { exact: true })).toBeVisible();
+  await expect(page.getByText('Not found in CV', { exact: true })).toBeVisible();
+  await expect(page.getByText('Needs checking', { exact: true })).toBeVisible();
+  await expect(page.locator('.activity')).toBeHidden();
+  await page.getByRole('button', { name: 'See this quote in the CV' }).click();
+  const highlighted = page.locator('.candidate-panel mark');
+  await expect(highlighted).toHaveText('Built monthly reports with SQL at Example Company.');
+  expect(await highlighted.evaluate(mark => {
+    const pre = mark.closest('pre')!;
+    return mark.getBoundingClientRect().top >= pre.getBoundingClientRect().top && mark.getBoundingClientRect().top < pre.getBoundingClientRect().bottom;
+  })).toBe(true);
+  await mkdir('.local-checks', { recursive: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({ path: '.local-checks/evidence-desktop.png', fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({ path: '.local-checks/evidence-mobile.png', fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await page.getByRole('button', { name: 'Edit requirements' }).click();
+  await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toHaveCount(0);
+  await page.getByLabel('Requirement 1', { exact: true }).fill('');
+  await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeDisabled();
+});
+
+test('reads every private Word CV and a PDF JD, and clears unreadable replacements without AI calls', async ({ page }) => {
+  const directory = path.resolve('test-cvs');
+  const files: string[] = await readdir(directory, { encoding: 'utf8' }).catch(() => [] as string[]);
+  const wordFiles = files.filter(file => /\.docx$/i.test(file));
+  test.skip(!files.includes('JD.pdf') || !wordFiles.length, 'Private test files are absent.');
+  await simulateActions(page);
+  await page.goto('/');
+  await page.getByLabel('Choose job description').setInputFiles(path.join(directory, 'JD.pdf'));
+  await expect(page.getByRole('button', { name: 'Extract requirements', exact: true })).toBeEnabled();
+  expect((await page.locator('.role-column pre').textContent())!.length).toBeGreaterThan(30);
+  await page.getByRole('button', { name: 'Add a requirement' }).click();
+  await page.getByLabel('Requirement 1', { exact: true }).fill('Recruiter-confirmed requirement for file-reading test');
+  await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
+  for (let i = 0; i < wordFiles.length; i++) {
+    await page.getByLabel(i === 0 ? 'Choose candidate CV' : 'Replace candidate CV').setInputFiles(path.join(directory, wordFiles[i]));
+    await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toBeEnabled();
+    expect((await page.locator('.candidate-panel pre').textContent())!.length).toBeGreaterThan(30);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  }
+  await page.getByLabel('Replace candidate CV').setInputFiles({ name: 'broken.docx', mimeType: docxType, buffer: Buffer.from('broken') });
+  await expect(page.getByRole('alert')).toContainText('could not be read');
+  await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toHaveCount(0);
+  await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'old-format.doc', mimeType: 'application/msword', buffer: Buffer.from('old Word file') });
+  await expect(page.getByRole('alert')).toContainText('save it as .docx');
+  await page.getByLabel('Choose candidate CV').setInputFiles(path.join(directory, wordFiles[0]));
+  await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toBeEnabled();
+  const protectedFile = await page.request.get('/test-cvs/JD.pdf');
+  expect(protectedFile.status()).toBe(403);
+  console.log(`Read one PDF JD and ${wordFiles.length} Word CVs without sending document text to AI.`);
+});

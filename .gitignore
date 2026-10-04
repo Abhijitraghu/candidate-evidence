@@ -8,3 +8,12 @@ dist/
 /test-results/
 /playwright-report/
 /.local-checks/
+
+/public/pdfjs/
+/.impeccable/review/
+/.impeccable/mocks/
+
+# Private documents and downloaded reports never belong in the public repo.
+*.pdf
+*.doc
+*.docx

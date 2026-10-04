@@ -4,12 +4,39 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/evidence.test.ts",
+    "test:browser": "playwright test",
+    "backend": "convex dev",
+    "predev": "node scripts/copy-pdf-assets.mjs",
+    "prebuild": "node scripts/copy-pdf-assets.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "convex": "^1.46.0"
-  }
+    "@ai-sdk/openai": "^4.0.83",
+    "@convex-dev/agent": "^0.7.3",
+    "@fontsource/source-sans-3": "^5.3.0",
+    "ai": "^7.0.127",
+    "convex": "^1.46.0",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jszip": "^3.10.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  },
+  "type": "module",
+  "private": true
 }
