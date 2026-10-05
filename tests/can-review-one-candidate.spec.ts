@@ -47,6 +47,7 @@ test('recruiter confirms a JD before inspecting exact evidence for one CV', asyn
     page.getByRole('heading', { name: 'Evidence for this candidate', exact: true }).waitFor({ state: 'visible', timeout: 120000 }),
     page.getByRole('alert').waitFor({ state: 'visible', timeout: 120000 }).then(async () => { throw new Error(await page.getByRole('alert').innerText()); }),
   ]);
+  await page.getByText('View full evidence', { exact: true }).click();
   const rows = page.locator('.evidence-panel .evidence-row');
   expect(await rows.count()).toBe(editedRequirement);
   const cvText = await page.locator('.candidate-panel pre').textContent();

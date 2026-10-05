@@ -36,13 +36,13 @@ function DocumentText({ document, highlight, expanded }: { document: ReadDocumen
 
 function RecommendationBullets({result, requirements}: {result: CandidateResult; requirements: DraftRequirement[]}) {
   const text = (row: VerifiedEvidence) => requirements.find(r => r.id === row.requirementId)?.text ?? row.requirementId;
-  const strengths = result.evidence.filter(row => row.status === 'found');
-  const weaknesses = result.evidence.filter(row => ['not_found', 'partial', 'conflicting'].includes(row.status));
-  const checks = result.evidence.filter(row => row.status !== 'found');
+  const strengths = result.evidence.filter(row => row.status === 'found').slice(0, 3);
+  const weaknesses = result.evidence.filter(row => ['not_found', 'partial', 'conflicting'].includes(row.status)).sort((a,b) => Number(requirements.find(r => r.id === b.requirementId)?.mustHave) - Number(requirements.find(r => r.id === a.requirementId)?.mustHave)).slice(0, 3);
+  const checks = [...weaknesses, ...result.evidence.filter(row => row.status === 'needs_checking')].slice(0, 3);
   return <div className="recommendation-bullets">
     <h4>Recommendation</h4><ul><li><strong>{result.recommendation}</strong> — {result.reason} Coverage: {result.coverage}%.</li></ul>
-    <h4>Strengths</h4><ul>{strengths.length ? strengths.map(row => <li key={row.requirementId}><strong>{text(row)}</strong>{row.quotes.map((quote,i) => <blockquote key={i}>{quote.text}</blockquote>)}</li>) : <li>No fully supported JD requirements.</li>}</ul>
-    <h4>Weaknesses</h4><ul>{weaknesses.length ? weaknesses.map(row => <li key={row.requirementId}><strong>{text(row)}</strong> — {row.status === 'not_found' ? 'No CV evidence for this JD requirement.' : row.status === 'partial' ? 'The full JD requirement is not supported; only partial CV evidence was found.' : 'The CV contains a conflicting claim.'}{row.status !== 'not_found' && row.quotes.map((quote,i) => <blockquote key={i}>{quote.text}</blockquote>)}</li>) : <li>No gaps in CV-checkable requirements.</li>}</ul>
+    <h4>Strengths</h4><ul>{strengths.length ? strengths.map(row => <li key={row.requirementId}><strong>{text(row)}</strong>{row.quotes.slice(0, 1).map((quote,i) => <blockquote key={i}>{quote.text.length > 160 ? quote.text.slice(0, 157) + '…' : quote.text}</blockquote>)}</li>) : <li>No fully supported JD requirements.</li>}</ul>
+    <h4>Gaps</h4><ul>{weaknesses.length ? weaknesses.map(row => <li key={row.requirementId}><strong>{text(row)}</strong> — {row.status === 'not_found' ? 'No CV evidence.' : row.status === 'partial' ? 'Partial CV evidence.' : 'Conflicting CV evidence.'}</li>) : <li>No gaps in CV-checkable requirements.</li>}</ul>
     <h4>Check on call</h4><ul>{checks.length ? checks.map(row => <li key={row.requirementId}>{row.question}</li>) : <li>Verify the scope and depth of the quoted experience.</li>}</ul>
   </div>;
 }
@@ -188,7 +188,7 @@ export default function App() {
           </section>
           {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><RecommendationBullets result={candidate.result} requirements={requirements} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
-            <h2 id="evidence-heading">Evidence for this candidate</h2>{result && <p><strong>{result.recommendation}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
+            <h2 id="evidence-heading">Evidence for this candidate</h2><details><summary>View full evidence</summary>{result && <p><strong>{result.recommendation}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
             {failedRows > 0 && <p className="evidence-note" role="status">The assessment is incomplete: {failedRows} requirements could not be verified. Each affected row explains why. This does not establish that the candidate lacks those skills.</p>}
             {report.map(row => { const requirement = requirements.find(r => r.id === row.requirementId)!; return <article className="evidence-row" key={row.requirementId}>
@@ -196,7 +196,7 @@ export default function App() {
               <span className={`evidence-status status-${row.status}`}>{statusLabels[row.status]}</span>
               {row.quotes.map((quote, index) => <div className="cv-quote" key={index}><blockquote>{quote.text}</blockquote><button className="text-button" onClick={() => { setHighlight({ start: quote.start, end: quote.end }); cvRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' }); }}>See this quote in the CV</button></div>)}
               <p>{displayExplanation(row.explanation)}</p><div className="call-question"><strong>Ask in a recruiter call</strong><p>{displayExplanation(row.question)}</p></div>
-            </article>; })}
+            </article>; })}</details>
           </section>}
         </div>
       </div>

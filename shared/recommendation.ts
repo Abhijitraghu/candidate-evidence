@@ -1,6 +1,6 @@
 import type { Requirement, VerifiedEvidence } from './evidence.ts';
 
-export const RULE_VERSION = '2.2.0';
+export const RULE_VERSION = '2.3.0';
 export const labels = ['Move to next round', 'Maybe', 'Not now'] as const;
 export type Recommendation = typeof labels[number];
 export type EvidenceRule = Requirement & { groups: string[][]; interviewOnly: boolean; assessmentMonth?: string };
@@ -98,7 +98,15 @@ export function recommend(requirements: EvidenceRule[], cv: string): CandidateRe
   const points = evidence.reduce((sum, row) => sum + (row.status === 'found' ? 1 : row.status === 'partial' ? .5 : 0), 0);
   const coverage = eligible.length ? Math.round(points / eligible.length * 10000) / 100 : 0;
   const missingMustHaves = eligible.filter(r => r.mustHave && evidence.find(row => row.requirementId === r.id)!.status !== 'found').map(r => r.text);
-  const allMust = eligible.filter(r => r.mustHave).every(r => evidence.find(row => row.requirementId === r.id)!.status === 'found');
-  const recommendation: Recommendation = missingMustHaves.length || (eligible.length > 0 && coverage === 0) ? 'Not now' : allMust && coverage >= 80 ? 'Move to next round' : 'Maybe';
-  return { evidence, recommendation, coverage, missingMustHaves, ruleVersion: RULE_VERSION, reason: missingMustHaves.length ? 'A confirmed must-have is not fully supported by CV evidence. Review wording and context before deciding.' : recommendation === 'Not now' ? 'No CV-checkable requirement has supporting evidence. Review wording before deciding.' : recommendation === 'Move to next round' ? 'Every CV-checkable must-have has full evidence and requirement coverage is at least 80%.' : 'Partial evidence or coverage below 80% needs recruiter review.' };
+  const mustHaves = eligible.filter(r => r.mustHave);
+  const statusFor = (r: EvidenceRule) => evidence.find(row => row.requirementId === r.id)!.status;
+  const absent = mustHaves.filter(r => ['not_found', 'conflicting'].includes(statusFor(r)));
+  const incomplete = mustHaves.filter(r => statusFor(r) !== 'found');
+  const recommendation: Recommendation = absent.length || (eligible.length > 0 && coverage === 0) ? 'Not now' : incomplete.length === 0 && coverage >= 80 ? 'Move to next round' : 'Maybe';
+  const reason = absent.length ? `Must-have without supporting CV evidence: ${absent.map(r => r.text).join('; ')}`
+    : incomplete.length ? `Must-have with partial CV evidence: ${incomplete.map(r => r.text).join('; ')}`
+    : recommendation === 'Not now' ? 'No CV-checkable requirement has supporting evidence.'
+    : recommendation === 'Move to next round' ? 'All must-haves fully shown; coverage at least 80%.'
+    : 'All must-haves fully shown; coverage below 80%.';
+  return { evidence, recommendation, coverage, missingMustHaves, ruleVersion: RULE_VERSION, reason };
 }

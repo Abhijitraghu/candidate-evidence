@@ -70,6 +70,7 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'synthetic-cv.docx', mimeType: docxType, buffer: await word(cv) });
   await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toBeVisible();
+  await page.getByText('View full evidence', { exact: true }).click();
   await expect(page.locator('.evidence-panel').getByText('Evidence found', { exact: true })).toBeVisible();
   await expect(page.getByText('Synthetic test interpretation: the CV claims SQL reporting work.', { exact: true })).toBeVisible();
   await expect(page.locator('.evidence-panel').getByText('Not found in CV', { exact: true })).toBeVisible();
@@ -94,10 +95,10 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await page.getByRole('combobox', {name:'Recruiter recommendation for synthetic-cv.docx'}).selectOption('Move to next round');
   await page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'}).fill('Call to clarify Python');
   const recommendation = page.getByRole('region', {name:'Candidate recommendations'});
-  for (const name of ['Recommendation','Strengths','Weaknesses','Check on call']) await expect(recommendation.getByRole('heading',{name,exact:true})).toBeVisible();
+  for (const name of ['Recommendation','Strengths','Gaps','Check on call']) await expect(recommendation.getByRole('heading',{name,exact:true})).toBeVisible();
   await expect(recommendation.locator('.recommendation-bullets')).toContainText('Maybe');
   await expect(recommendation.locator('.recommendation-bullets')).toContainText('Built monthly reports with SQL at Example Company.');
-  await expect(recommendation.locator('.recommendation-bullets')).toContainText('No CV evidence for this JD requirement.');
+  await expect(recommendation.locator('.recommendation-bullets')).toContainText('No CV evidence.');
   await expect(page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'})).toHaveValue('Call to clarify Python');
   await page.getByRole('button', { name: 'Edit requirements' }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toHaveCount(0);
@@ -117,6 +118,7 @@ test('failed verification explains each cause without showing a zero-evidence ca
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
   await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'cv.docx', mimeType: docxType, buffer: await word('An example applicant who claims SQL reporting experience in a synthetic CV.') });
   await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
+  await page.getByText('View full evidence', { exact: true }).click();
   await expect(page.getByText('No verified assessment is available. Retry the assessment; you can still read the CV.')).toBeVisible();
   await expect(page.locator('.evidence-panel').getByText(/a quote that did not match/)).toBeVisible();
   await expect(page.locator('.evidence-panel').getByText(/claim without a supporting quote/)).toBeVisible();

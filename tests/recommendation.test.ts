@@ -13,7 +13,7 @@ test('recommendations gate on must-haves and the 80 percent boundary', () => {
 test('limited or negative claims are partial and cannot satisfy a must-have', () => {
  for (const text of ['Basic SQL exposure','Learning SQL']) {
  const result = recommend([rule('SQL',true)],cv(text));
- assert.equal(result.recommendation,'Not now'); assert.equal(result.evidence[0].status,'partial'); assert.equal(result.coverage,50);
+ assert.equal(result.recommendation,'Maybe'); assert.match(result.reason,/SQL/); assert.equal(result.evidence[0].status,'partial'); assert.equal(result.coverage,50);
  }
 });
 test('communication is excluded from gates and coverage, unreadable input has no recommendation', () => {
@@ -61,3 +61,5 @@ test('new roles automatically get bounded rules instead of requiring the full JD
  test('unrelated CVs with no must-haves also return Not now', () => {
  assert.equal(recommend([rule('SQL'),rule('Python')],cv('Restaurant cook and menu planning')).recommendation,'Not now');
  });
+
+test('absent must-have overrides partial evidence and names the absent requirement', () => { const result = recommend([rule('SQL',true),rule('Python',true)],cv('Learning SQL')); assert.equal(result.recommendation,'Not now'); assert.match(result.reason,/Python/); });
