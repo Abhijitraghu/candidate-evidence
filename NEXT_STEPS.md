@@ -1,5 +1,15 @@
 # Milestone 1 handoff
 
+## Latest verification — 5 October 2026
+
+Credits now work. The development backend update, all five evidence-validation tests, all three browser tests (including the previously failing synthetic review screen and the real OpenAI flow), and the build passed. Live assessments also completed for all eight Word CVs against the same 15 extracted requirements. Private detailed results and review findings are saved in `.local-checks/live-results.md` and `.local-checks/live-results.json`, excluded from git.
+
+Quality review found 62 of 120 evidence rows falling back to Needs checking; all 15 rows for one CV did so despite explicit relevant claims. Some accepted interpretations overstate skill strength. Requirement extraction missed separate responsibility details and grouped independent tools. The JD also contains conflicting experience ranges (1–7 and 1–3 years). Recruiter correction/comparison and assessment-quality improvements remain necessary before calling milestone 1 complete. Live desktop screenshot inspected; mobile width checks passed with synthetic responses, but live mobile has not been visually inspected. No GitHub push or production deployment was performed.
+
+Next: review the private report with the recruiter, correct the requirement list, improve evidence extraction and interpretation, then reassess.
+
+## Earlier handoff (historical; billing block below is resolved)
+
 Stopped at the builder's request on 5 October 2026. Milestone 1 is built but **not fully verified with live OpenAI assessment**. OpenAI credits will be added tomorrow. Nothing has been pushed to GitHub or deployed to production.
 
 ## Done
