@@ -95,3 +95,11 @@ Rule version 2.1.0 accepts `ITIL`, `ITSM` or `incident management` for ITIL fami
 Run `npm run deploy` to build the frontend against the production backend, deploy Convex functions and upload the static files to the production `.convex.site` address. GitHub pushes do not deploy the app. Hosting uses `@convex-dev/static-hosting` mounted at `/`; app-owned HTTP routes use `/api`. Upload functions are internal and require Convex CLI authentication.
 
 The production Convex environment needs `OPENAI_API_KEY` for JD extraction. Keep this key in Convex settings, never in frontend code or GitHub. Development continues with `npm run dev` and `npm run backend`. `VITE_CONVEX_URL` supplied by the deployment command takes priority over the local public `CONVEX_URL` fallback.
+
+## Live release
+
+- App: https://opulent-alligator-318.convex.site
+- Public code: https://github.com/Abhijitraghu/candidate-evidence
+- Production release deployed with `npm run deploy` on 5 October 2026.
+- Before publishing, all Git history was checked: no test-cvs, environment files, private reports, PDF/Word CVs or recognizable API keys were found.
+- Verification: 25 unit checks, 4 development browser flows and build passed; the real JD upload → extraction → confirmation → CV assessment → exact quote/highlight flow also passed against the live production URL. Desktop and phone layouts checked. The live bundle connects to the production backend.

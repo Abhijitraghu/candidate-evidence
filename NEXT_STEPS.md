@@ -97,3 +97,13 @@ See README.md for the complete local checking instructions. Screenshot review wa
 - Two fresh live backend runs on all eight test-cvs were deeply identical across recommendations, coverage, explanations, quotes and offsets. Counts in each: Move to next round 1 (Nagalakshmi), Maybe 4 (Bhavya, Bhimappa, Hemanth, Manjunath), Not now 3 (Karthik, Kaveri, Madhu).
 - Full exact evidence and both outputs: ignored `.local-checks/milestone2-approved-live.md` and `.json`. Previous comparison files retained. No AI budget override needed. No push or production deploy.
 - Next: recruiter review of the remaining Microsoft 365, VPN, service-desk and ticketing gaps, with their exact CV evidence.
+
+## Shipped — 5 October 2026
+
+- Public repository created and pushed: https://github.com/Abhijitraghu/candidate-evidence
+- Convex static hosting installed and mounted at root. Deploy command: `npm run deploy`; GitHub pushes do not deploy.
+- Production app: https://opulent-alligator-318.convex.site; backend: https://opulent-alligator-318.convex.cloud. Production JD extraction key configured privately in Convex environment settings.
+- Git history checked before push: private CVs, test-cvs, environment files and private reports absent; no recognizable API keys found. Production private-file paths serve no private content (PDF/report paths 404; environment-file path returns only the app HTML fallback).
+- All 25 unit tests, 4 development browser tests and build passed. Real production browser core flow passed with exact quotes, highlights, requirement editing and unreadable replacement handling; phone and desktop inspected.
+- Initial deployment stopped because an environment change overlapped the push; rerun with the finalized environment succeeded. Deployed code commit: 47eb7a4.
+- Next: use the live app for the recruiter’s independent shortlist comparison. Session-only notes and results still clear on refresh, as planned for milestone 2.
