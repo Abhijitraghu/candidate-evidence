@@ -66,7 +66,7 @@ test('review screen handles errors, evidence, highlights and requirement edits u
 
   await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
-  const cv = 'Example Applicant. ' + 'Additional synthetic CV content. '.repeat(45) + 'Built monthly reports with SQL at Example Company. No other claims are made in this synthetic document.';
+  const cv = 'Example Applicant.\nProfile Summary\n' + 'Additional synthetic CV content. '.repeat(45) + '\nWork Experience\nBuilt monthly reports with SQL at Example Company.\nNo other claims are made in this synthetic document.';
   await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'synthetic-cv.docx', mimeType: docxType, buffer: await word(cv) });
   await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toBeVisible();
@@ -103,8 +103,11 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   const snapshot = page.getByRole('region', {name:'Candidate snapshot for synthetic-cv'});
   await expect(snapshot.locator('.coverage-ring strong')).toHaveText('50%');
   await expect(snapshot.locator('.snapshot-stats strong').first()).toHaveText('1 of 1');
-  await expect(snapshot.locator('.requirement-call')).toHaveCount(1);
-  await expect(snapshot.locator('.requirement-call')).toHaveText('Excluded from CV coverage');
+  await expect(snapshot.locator('.requirement-bar')).toHaveCount(1);
+  await expect(snapshot.locator('.snapshot-other summary')).toHaveText('0 of 2 other requirements shown');
+  await snapshot.locator('.snapshot-other summary').click();
+  await expect(snapshot.locator('.other-requirements')).toBeVisible();
+  await expect(snapshot.locator('.other-requirements')).toContainText('Check on call (unscored)');
   const downloadEvent = page.waitForEvent('download');
   await snapshot.getByRole('button', {name:'Download PDF'}).click();
   const download = await downloadEvent;
@@ -112,6 +115,9 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   const pdf = await readFile((await download.path())!);
   expect(pdf.subarray(0,5).toString()).toBe('%PDF-');
   expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)).toHaveLength(1);
+  const pageSize = pdf.toString('latin1').match(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/)!;
+  expect(Number(pageSize[1])).toBeCloseTo(595.28,2);
+  expect(Number(pageSize[2])).toBeCloseTo(841.89,2);
   await page.getByRole('button', { name: 'Edit requirements' }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toHaveCount(0);
