@@ -89,3 +89,9 @@ CVs can be assessed sequentially and remain visible in the current session. Each
 ### Recruiter-approved rule update (5 October 2026)
 
 Rule version 2.1.0 accepts `ITIL`, `ITSM` or `incident management` for ITIL familiarity. Communication and analytical troubleshooting quality are marked Check on recruiter call, with mustHave false, and excluded from coverage and recommendation gates. Specific JD troubleshooting tasks remain CV requirements. The recruiter chose 1–7 years: draft review keeps that range and removes the conflicting 1–3-year row when both appear, preserving original source quotes on retained requirements. Confirmed rules remain editable.
+
+## Publish with Convex static hosting
+
+Run `npm run deploy` to build the frontend against the production backend, deploy Convex functions and upload the static files to the production `.convex.site` address. GitHub pushes do not deploy the app. Hosting uses `@convex-dev/static-hosting` mounted at `/`; app-owned HTTP routes use `/api`. Upload functions are internal and require Convex CLI authentication.
+
+The production Convex environment needs `OPENAI_API_KEY` for JD extraction. Keep this key in Convex settings, never in frontend code or GitHub. Development continues with `npm run dev` and `npm run backend`. `VITE_CONVEX_URL` supplied by the deployment command takes priority over the local public `CONVEX_URL` fallback.
