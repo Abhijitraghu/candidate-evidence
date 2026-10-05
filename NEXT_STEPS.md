@@ -88,3 +88,12 @@ See README.md for the complete local checking instructions. Screenshot review wa
 - 24 unit checks and all 4 browser flows passed, including prior review-screen failure checks, live JD extraction/CV assessment and recruiter override/note controls. Build passed; Convex dev functions pushed. Desktop and phone inspected without horizontal overflow.
 - Temporary bounded AI test limit removed; default 30/hour restored. Private CVs and reports remain ignored. No production deploy or git push.
 - Next: recruiter independently reviews the draft evidence phrases and shortlist. Repeatability is demonstrated; shortlist accuracy and time savings still require recruiter validation.
+
+## Approved matching update — 5 October 2026
+
+- Recruiter approved ITSM and incident management as alternatives to ITIL; communication and analytical troubleshooting quality moved out of must-haves into recruiter-call checks. Approved experience range is 1–7 years.
+- Rule version 2.1.0 implemented in draft rules and requirement review. Specific troubleshooting responsibilities remain assessable; call-only qualities do not affect coverage or recommendations.
+- 25 unit tests, all 4 browser tests and build passed; Convex development functions updated.
+- Two fresh live backend runs on all eight test-cvs were deeply identical across recommendations, coverage, explanations, quotes and offsets. Counts in each: Move to next round 1 (Nagalakshmi), Maybe 4 (Bhavya, Bhimappa, Hemanth, Manjunath), Not now 3 (Karthik, Kaveri, Madhu).
+- Full exact evidence and both outputs: ignored `.local-checks/milestone2-approved-live.md` and `.json`. Previous comparison files retained. No AI budget override needed. No push or production deploy.
+- Next: recruiter review of the remaining Microsoft 365, VPN, service-desk and ticketing gaps, with their exact CV evidence.

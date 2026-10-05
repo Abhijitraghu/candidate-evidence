@@ -6,7 +6,7 @@ import { readDocument, type ReadDocument } from "./lib/documents";
 import type { VerifiedEvidence, EvidenceStatus } from "../shared/evidence";
 import { displayExplanation, experienceWarnings, type DraftRequirement } from "../shared/assessment";
 
-import { draftRule, ruleText, parseGroups, labels, type EvidenceRule, type CandidateResult, type Recommendation } from '../shared/recommendation';
+import { draftRule, approvedRequirements, ruleText, parseGroups, labels, type EvidenceRule, type CandidateResult, type Recommendation } from '../shared/recommendation';
 
 const statusLabels: Record<EvidenceStatus, string> = {
   found: 'Evidence found', partial: 'Partial evidence', conflicting: 'Conflicting evidence',
@@ -78,7 +78,7 @@ export default function App() {
     if (!jd || busy) return;
     setBusy('Finding requirements in the JD…'); setError(null); setReport(null);
     try {
-      const draft = await extract({ jdText: jd.text });
+      const draft = approvedRequirements(await extract({ jdText: jd.text }));
       setRequirements(draft); setRules(Object.fromEntries(draft.map(row => [row.id, draftRule(row)]))); setConfirmed(false); setRangesReviewed(false); setConfigured(true);
       requirementsRef.current?.focus();
     } catch (err) { setError({ area: 'jd', text: message(err) }); }
@@ -136,7 +136,7 @@ export default function App() {
             <div className="requirement-list">{requirements.map((row, index) => <div className="requirement" key={row.id}>
               <label className="requirement-label" htmlFor={`requirement-${row.id}`}>Requirement {index + 1}</label>
               {confirmed ? <p className="confirmed-text">{row.text}</p> : <textarea id={`requirement-${row.id}`} value={row.text} maxLength={1000} disabled={!!busy} rows={2} onChange={event => editRequirement(row.id, { text: event.target.value, sourceQuote: null })} />}
-              <div className="requirement-controls">{confirmed ? <span>{row.mustHave ? 'Must-have' : 'Additional requirement'}</span> : <label className="checkbox"><input type="checkbox" checked={row.mustHave} disabled={!!busy} onChange={event => editRequirement(row.id, { mustHave: event.target.checked })} />Must-have</label>}
+              <div className="requirement-controls">{confirmed ? <span>{(rules[row.id] ?? draftRule(row)).interviewOnly ? 'Check on recruiter call' : row.mustHave ? 'Must-have' : 'Additional requirement'}</span> : <label className="checkbox"><input type="checkbox" checked={row.mustHave} disabled={!!busy} onChange={event => editRequirement(row.id, { mustHave: event.target.checked })} />Must-have</label>}
                 {!confirmed && <button className="text-button" disabled={!!busy} aria-label={`Remove requirement ${index + 1}`} onClick={() => setRequirements(rows => rows.filter(item => item.id !== row.id))}>Remove</button>}
               </div>
               {row.sourceQuote ? <details className="source-quote"><summary>Supporting JD quote</summary><blockquote>{row.sourceQuote}</blockquote></details> : <small>Added or edited by you, or no exact JD quote verified. Check against the role.</small>}
@@ -166,7 +166,7 @@ export default function App() {
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
             {failedRows > 0 && <p className="evidence-note" role="status">The assessment is incomplete: {failedRows} requirements could not be verified. Each affected row explains why. This does not establish that the candidate lacks those skills.</p>}
             {report.map(row => { const requirement = requirements.find(r => r.id === row.requirementId)!; return <article className="evidence-row" key={row.requirementId}>
-              <div className="evidence-title"><h3>{requirement.text}</h3>{requirement.mustHave && <span className="must-have">Must-have</span>}</div>
+              <div className="evidence-title"><h3>{requirement.text}</h3>{requirement.mustHave && !(rules[requirement.id] ?? draftRule(requirement)).interviewOnly && <span className="must-have">Must-have</span>}</div>
               <span className={`evidence-status status-${row.status}`}>{statusLabels[row.status]}</span>
               {row.quotes.map((quote, index) => <div className="cv-quote" key={index}><blockquote>{quote.text}</blockquote><button className="text-button" onClick={() => { setHighlight({ start: quote.start, end: quote.end }); cvRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' }); }}>See this quote in the CV</button></div>)}
               <p>{displayExplanation(row.explanation)}</p><div className="call-question"><strong>Ask in a recruiter call</strong><p>{displayExplanation(row.question)}</p></div>

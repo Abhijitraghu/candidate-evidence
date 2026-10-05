@@ -1,6 +1,6 @@
 import type { Requirement, VerifiedEvidence } from './evidence.ts';
 
-export const RULE_VERSION = '2.0.0';
+export const RULE_VERSION = '2.1.0';
 export const labels = ['Move to next round', 'Maybe', 'Not now'] as const;
 export type Recommendation = typeof labels[number];
 export type EvidenceRule = Requirement & { groups: string[][]; interviewOnly: boolean; assessmentMonth?: string };
@@ -11,7 +11,7 @@ const concepts: [RegExp, string[]][] = [
   [/service desk/i, ['service desk', 'service-desk', 'helpdesk', 'help desk']],
   [/active directory/i, ['active directory', 'AD']], [/\bVPN\b/i, ['VPN', 'VPNs', 'virtual private network']],
   [/Microsoft 365|O365|Office 365/i, ['Microsoft 365', 'Office 365', 'Office365', 'O365', 'M365']],
-  [/\bITIL\b/i, ['ITIL']], [/ticketing/i, ['ticketing', 'ServiceNow', 'Service Now', 'Remedy', 'Jira', 'Freshdesk']],
+  [/\bITIL\b/i, ['ITIL', 'ITSM', 'incident management']], [/ticketing/i, ['ticketing', 'ServiceNow', 'Service Now', 'Remedy', 'Jira', 'Freshdesk']],
   [/\bDLP\b/i, ['DLP', 'data loss prevention']], [/\bAzure\b/i, ['Azure']],
   [/MDM|Intune/i, ['MDM', 'Intune', 'mobile device management']],
   [/application support/i, ['application support', 'application troubleshooting']],
@@ -36,7 +36,16 @@ const concepts: [RegExp, string[]][] = [
 export function draftRule(requirement: Requirement): EvidenceRule {
   const interviewOnly = /communication|culture|personality|analytical skills/i.test(requirement.text);
   const groups = concepts.filter(([pattern]) => pattern.test(requirement.text)).map(([, terms]) => terms);
-  return { ...requirement, groups: groups.length ? groups : [[requirement.text.replace(/[.]$/, '').trim()]], interviewOnly };
+  return { ...requirement, mustHave: interviewOnly ? false : requirement.mustHave, groups: groups.length ? groups : [[requirement.text.replace(/[.]$/, '').trim()]], interviewOnly };
+}
+// The recruiter approved these defaults for this role; original JD source quotes stay intact.
+export function approvedRequirements<T extends Requirement>(rows: T[]): T[] {
+  const widerExists = rows.some(row => /1\s*[-–]\s*7\s*years/i.test(row.text));
+  return rows.filter(row => !(widerExists && /1\s*[-–]\s*3\s*years/i.test(row.text))).map(row => ({
+    ...row,
+    text: row.text.replace(/1\s*[-–]\s*3\s*years/gi, '1-7 years'),
+    mustHave: draftRule(row).interviewOnly ? false : row.mustHave,
+  }));
 }
 export function ruleText(rule: EvidenceRule): string { return rule.groups.map(group => group.join(' / ')).join('; '); }
 export function parseGroups(text: string): string[][] { return text.split(';').map(group => group.split('/').map(term => term.trim()).filter(Boolean)).filter(group => group.length); }

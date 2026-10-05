@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recommend, draftRule, type EvidenceRule } from '../shared/recommendation.ts';
+import { recommend, draftRule, approvedRequirements, type EvidenceRule } from '../shared/recommendation.ts';
 const rule = (id:string, mustHave=false): EvidenceRule => ({id,text:id,mustHave,groups:[[id]],interviewOnly:false});
 const cv = (skills:string) => `Candidate CV with professional experience.\n${skills}`;
 test('recommendations gate on must-haves and the 80 percent boundary', () => {
@@ -40,3 +40,12 @@ test('experience uses the confirmed month and counts overlapping dates once', ()
 });
 
 test('explicit denial of a must-have is Not now with the original quote', () => { const result = recommend([rule('SQL',true)],cv('No SQL experience')); assert.equal(result.recommendation,'Not now'); assert.equal(result.evidence[0].status,'conflicting'); assert.equal(result.evidence[0].quotes[0].text,'No SQL experience'); });
+
+test('approved ITIL alternatives count and call checks are not must-haves', () => {
+ const r=draftRule({id:'itil',text:'Familiarity with ITIL processes.',mustHave:true});
+ for (const phrase of ['ITIL','ITSM','incident management']) assert.equal(recommend([r],cv(`Worked with ${phrase}`)).recommendation,'Move to next round');
+ const rows=approvedRequirements([{id:'wide',text:'1-7 years',mustHave:false},{id:'short',text:'1-3 years',mustHave:false},{id:'c',text:'Excellent communication skills',mustHave:true},{id:'a',text:'Analytical skills to troubleshoot and resolve issues efficiently.',mustHave:true}]);
+ assert.deepEqual(rows.map(r=>r.id),['wide','c','a']);
+ for(const row of rows.slice(1)) {assert.equal(row.mustHave,false);assert.equal(draftRule(row).interviewOnly,true);}
+ assert.equal(recommend([rule('SQL',true),...rows.slice(1).map(draftRule)],cv('SQL')).recommendation,'Move to next round');
+});
