@@ -1,3 +1,4 @@
+import { CandidateSnapshot } from "./CandidateSnapshot";
 import { useAction } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { ConvexError } from "convex/values";
@@ -34,19 +35,6 @@ function DocumentText({ document, highlight, expanded }: { document: ReadDocumen
   </details>;
 }
 
-function RecommendationBullets({result, requirements}: {result: CandidateResult; requirements: DraftRequirement[]}) {
-  const text = (row: VerifiedEvidence) => requirements.find(r => r.id === row.requirementId)?.text ?? row.requirementId;
-  const strengths = result.evidence.filter(row => row.status === 'found').slice(0, 3);
-  const weaknesses = result.evidence.filter(row => ['not_found', 'partial', 'conflicting'].includes(row.status)).sort((a,b) => Number(requirements.find(r => r.id === b.requirementId)?.mustHave) - Number(requirements.find(r => r.id === a.requirementId)?.mustHave)).slice(0, 3);
-  const checks = [...weaknesses, ...result.evidence.filter(row => row.status === 'needs_checking')].slice(0, 3);
-  return <div className="recommendation-bullets">
-    <h4>Recommendation</h4><ul><li><strong>{result.recommendation}</strong> — {result.reason} Coverage: {result.coverage}%.</li></ul>
-    <h4>Strengths</h4><ul>{strengths.length ? strengths.map(row => <li key={row.requirementId}><strong>{text(row)}</strong>{row.quotes.slice(0, 1).map((quote,i) => <blockquote key={i}>{quote.text.length > 160 ? quote.text.slice(0, 157) + '…' : quote.text}</blockquote>)}</li>) : <li>No fully supported JD requirements.</li>}</ul>
-    <h4>Gaps</h4><ul>{weaknesses.length ? weaknesses.map(row => <li key={row.requirementId}><strong>{text(row)}</strong> — {row.status === 'not_found' ? 'No CV evidence.' : row.status === 'partial' ? 'Partial CV evidence.' : 'Conflicting CV evidence.'}</li>) : <li>No gaps in CV-checkable requirements.</li>}</ul>
-    <h4>Check on call</h4><ul>{checks.length ? checks.map(row => <li key={row.requirementId}>{row.question}</li>) : <li>Verify the scope and depth of the quoted experience.</li>}</ul>
-  </div>;
-}
-
 export default function App() {
   const extract = useAction(api.assessment.extractRequirements);
   const assess = useAction(api.assessment.recommendCandidate);
@@ -58,7 +46,7 @@ export default function App() {
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [rules, setRules] = useState<Record<string, EvidenceRule>>({});
   const [assessmentMonth, setAssessmentMonth] = useState(new Date().toISOString().slice(0,7));
-  const [candidates, setCandidates] = useState<{name: string; result: CandidateResult | null; choice: Recommendation | ''; note: string; error?: string}[]>([]);
+  const [candidates, setCandidates] = useState<{name: string; result: CandidateResult | null; choice: Recommendation | ''; note: string; date?: string; error?: string}[]>([]);
   const [result, setResult] = useState<CandidateResult | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [rangesReviewed, setRangesReviewed] = useState(false);
@@ -118,7 +106,7 @@ export default function App() {
     try {
       const result = await assess({ cvText: cv.text, confirmed: true, requirements: requirements.map(row => ({...(rules[row.id] ?? draftRule(row)), ...row, text:row.text.trim(), assessmentMonth})).map(({id,text,mustHave,groups,interviewOnly,assessmentMonth}) => ({id,text,mustHave,groups,interviewOnly,assessmentMonth})) });
       const complete = !result.evidence.some(row => row.verificationIssue);
-      setResult(complete ? result : null); setCandidates(rows => [...rows.filter(row => row.name !== cv.name), {name:cv.name,result:complete ? result : null,choice:'',note:'', ...(!complete ? {error:'Incomplete evidence; retry before recommending.'} : {})}]);
+      setResult(complete ? result : null); setCandidates(rows => [...rows.filter(row => row.name !== cv.name), {name:cv.name,date:new Date().toISOString().slice(0,10),result:complete ? result : null,choice:'',note:'', ...(!complete ? {error:'Incomplete evidence; retry before recommending.'} : {})}]);
       setReport(result.evidence); setConfigured(true);
       requestAnimationFrame(() => evidenceRef.current?.focus());
     } catch (err) { setError({ area: 'cv', text: message(err) }); }
@@ -186,7 +174,7 @@ export default function App() {
               {cv && <><div className="file-summary"><strong>{cv.name}</strong><span>{cv.text.length.toLocaleString()} characters read</span></div><DocumentText document={cv} highlight={highlight} /><button className="primary" disabled={!!busy} onClick={() => void assessCandidate()}>{report ? 'Assess this CV again' : 'Assess this CV'}</button></>}
             </>}
           </section>
-          {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><RecommendationBullets result={candidate.result} requirements={requirements} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
+          {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><CandidateSnapshot name={candidate.name.replace(/\.(docx|pdf)$/i, '').trim()} role={jd?.text.split(/\r?\n/).find(line => line.trim())?.replace(/^Job Title:\s*/i, '') ?? jd?.name ?? 'Confirmed role'} date={candidate.date ?? assessmentMonth} result={candidate.result} requirements={requirements} rules={rules} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
             <h2 id="evidence-heading">Evidence for this candidate</h2><details><summary>View full evidence</summary>{result && <p><strong>{result.recommendation}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
@@ -201,7 +189,7 @@ export default function App() {
         </div>
       </div>
       <div className="activity" role="status" aria-live="polite">{busy && <><span className="busy-dot" />{busy} Please keep this page open.</>}</div>
-      <footer><p>Files stay in this browser session. Extracting JD requirements sends JD text through Convex to OpenAI. CV recommendations use fixed rules in Convex without an AI call. Refreshing clears this work.</p><p>Recommendations and recruiter notes are available in this session. Saving and export come later.</p></footer>
+      <footer><p>Files stay in this browser session. Extracting JD requirements sends JD text through Convex to OpenAI. CV recommendations use fixed rules in Convex without an AI call. Refreshing clears this work.</p><p>Recommendations and recruiter notes are available in this session. Download a one-page candidate snapshot for the hiring manager. Saving comes later.</p></footer>
     </main>
   </>;
 }
