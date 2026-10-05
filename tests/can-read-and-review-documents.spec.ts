@@ -57,6 +57,12 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await expect(page.getByRole('alert')).toContainText('Synthetic test: OpenAI usage limit');
   await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
   await expect(page.getByRole('button', {name:'Confirm requirements', exact:true})).toBeEnabled();
+  await expect(page.locator('.role-column pre')).toBeVisible();
+  await page.evaluate(() => scrollTo(0, 0));
+  const jdBox = await page.locator('.role-column > .panel').first().boundingBox();
+  const rulesBox = await page.locator('.requirements-panel').boundingBox();
+  expect(jdBox!.x + jdBox!.width).toBeLessThan(rulesBox!.x);
+  expect(Math.abs(jdBox!.y - rulesBox!.y)).toBeLessThan(2);
 
   await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
@@ -87,7 +93,11 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.getByRole('combobox', {name:'Recruiter recommendation for synthetic-cv.docx'}).selectOption('Move to next round');
   await page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'}).fill('Call to clarify Python');
-  await expect(page.getByText('App recommendation:', {exact:false})).toContainText('Maybe');
+  const recommendation = page.getByRole('region', {name:'Candidate recommendations'});
+  for (const name of ['Recommendation','Strengths','Weaknesses','Check on call']) await expect(recommendation.getByRole('heading',{name,exact:true})).toBeVisible();
+  await expect(recommendation.locator('.recommendation-bullets')).toContainText('Maybe');
+  await expect(recommendation.locator('.recommendation-bullets')).toContainText('Built monthly reports with SQL at Example Company.');
+  await expect(recommendation.locator('.recommendation-bullets')).toContainText('No CV evidence for this JD requirement.');
   await expect(page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'})).toHaveValue('Call to clarify Python');
   await page.getByRole('button', { name: 'Edit requirements' }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toHaveCount(0);
@@ -146,3 +156,36 @@ test('reads every private Word CV and a PDF JD, and clears unreadable replacemen
   expect(protectedFile.status()).toBe(403);
   console.log(`Read one PDF JD and ${wordFiles.length} Word CVs without sending document text to AI.`);
 });
+
+ test('pasted JD replaces the role and clears its old requirements', async ({page}) => {
+  await simulateActions(page);
+  await page.goto('/');
+  await page.getByLabel('Paste job description').fill('Required SQL experience and Python experience for a backend role.');
+  await page.getByRole('button', {name:'Use pasted JD'}).click();
+  await expect(page.locator('.role-column pre')).toContainText('Required SQL experience');
+  await page.getByRole('button', {name:'Extract requirements',exact:true}).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', {name:'Extract requirements',exact:true}).click();
+  await expect(page.getByLabel('Requirement 1',{exact:true})).toBeVisible();
+  await page.getByLabel('Paste job description').fill('A completely different role requiring hospital nursing experience.');
+  await page.getByRole('button', {name:'Use pasted JD'}).click();
+  await expect(page.getByLabel('Requirement 1',{exact:true})).toHaveCount(0);
+  await expect(page.getByText('Confirm the role first',{exact:true})).toBeVisible();
+  await expect(page.locator('.role-column pre')).toContainText('hospital nursing');
+ });
+
+ test('unsupported JD and CV files ask for PDF or Word', async ({page}) => {
+  await simulateActions(page);
+  await page.goto('/');
+  const bad = {name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('Text file content is not an uploaded Word or PDF document.')};
+  await page.getByLabel('Choose job description').setInputFiles(bad);
+  await expect(page.getByRole('alert')).toContainText('Please upload PDF or Word');
+  await page.getByLabel('Paste job description').fill('A backend role requiring SQL experience for reporting.');
+  await page.getByRole('button',{name:'Use pasted JD'}).click();
+  await page.getByRole('button',{name:'Add a requirement'}).click();
+  await page.getByLabel('Requirement 1',{exact:true}).fill('SQL experience');
+  await page.getByRole('button',{name:'Confirm requirements',exact:true}).click();
+  await page.getByLabel('Choose candidate CV').setInputFiles(bad);
+  await expect(page.getByRole('alert')).toContainText('Please upload PDF or Word');
+  await expect(page.getByRole('button',{name:'Assess this CV',exact:true})).toHaveCount(0);
+ });

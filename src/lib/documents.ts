@@ -2,7 +2,7 @@ export type ReadDocument = { name: string; text: string; pages: number | null };
 
 export async function readDocument(file: File): Promise<ReadDocument> {
   const extension = file.name.split('.').pop()?.toLowerCase();
-  if (!['pdf', 'docx'].includes(extension ?? '')) throw new Error('Choose a PDF or Word (.docx) file. For an older .doc file, save it as .docx in Word first.');
+  if (!['pdf', 'docx'].includes(extension ?? '')) throw new Error('Please upload PDF or Word (.docx). For an older .doc file, save it as .docx in Word first.');
   if (file.size === 0) throw new Error('This file is empty. Choose a readable PDF or Word document.');
   if (file.size > 10 * 1024 * 1024) throw new Error('This file is larger than 10 MB. Choose a smaller document.');
   const buffer = await file.arrayBuffer();

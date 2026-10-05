@@ -25,13 +25,26 @@ function FilePicker({ label, disabled, onFile }: { label: string; disabled: bool
     <p>PDF or Word (.docx), up to 10 MB. One file at a time.</p>
   </div>;
 }
-function DocumentText({ document, highlight }: { document: ReadDocument; highlight?: { start: number; end: number } | null }) {
+function DocumentText({ document, highlight, expanded }: { document: ReadDocument; highlight?: { start: number; end: number } | null; expanded?: boolean }) {
   const highlightRef = useRef<HTMLElement>(null);
   useEffect(() => { if (highlight) highlightRef.current?.scrollIntoView({ block: "nearest", behavior: "instant" }); }, [highlight]);
-  return <details className="document-text" open={highlight ? true : undefined}>
+  return <details className="document-text" open={expanded || highlight ? true : undefined}>
     <summary>Read extracted text from {document.name}</summary>
     <pre tabIndex={0}>{highlight ? <>{document.text.slice(0, highlight.start)}<mark ref={highlightRef}>{document.text.slice(highlight.start, highlight.end)}</mark>{document.text.slice(highlight.end)}</> : document.text}</pre>
   </details>;
+}
+
+function RecommendationBullets({result, requirements}: {result: CandidateResult; requirements: DraftRequirement[]}) {
+  const text = (row: VerifiedEvidence) => requirements.find(r => r.id === row.requirementId)?.text ?? row.requirementId;
+  const strengths = result.evidence.filter(row => row.status === 'found');
+  const weaknesses = result.evidence.filter(row => ['not_found', 'partial', 'conflicting'].includes(row.status));
+  const checks = result.evidence.filter(row => row.status !== 'found');
+  return <div className="recommendation-bullets">
+    <h4>Recommendation</h4><ul><li><strong>{result.recommendation}</strong> — {result.reason} Coverage: {result.coverage}%.</li></ul>
+    <h4>Strengths</h4><ul>{strengths.length ? strengths.map(row => <li key={row.requirementId}><strong>{text(row)}</strong>{row.quotes.map((quote,i) => <blockquote key={i}>{quote.text}</blockquote>)}</li>) : <li>No fully supported JD requirements.</li>}</ul>
+    <h4>Weaknesses</h4><ul>{weaknesses.length ? weaknesses.map(row => <li key={row.requirementId}><strong>{text(row)}</strong> — {row.status === 'not_found' ? 'No CV evidence for this JD requirement.' : row.status === 'partial' ? 'The full JD requirement is not supported; only partial CV evidence was found.' : 'The CV contains a conflicting claim.'}{row.status !== 'not_found' && row.quotes.map((quote,i) => <blockquote key={i}>{quote.text}</blockquote>)}</li>) : <li>No gaps in CV-checkable requirements.</li>}</ul>
+    <h4>Check on call</h4><ul>{checks.length ? checks.map(row => <li key={row.requirementId}>{row.question}</li>) : <li>Verify the scope and depth of the quoted experience.</li>}</ul>
+  </div>;
 }
 
 export default function App() {
@@ -39,6 +52,7 @@ export default function App() {
   const assess = useAction(api.assessment.recommendCandidate);
   const setup = useAction(api.assessment.setup);
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [jdInput, setJDInput] = useState('');
   const [jd, setJD] = useState<ReadDocument | null>(null);
   const [cv, setCV] = useState<ReadDocument | null>(null);
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
@@ -66,13 +80,23 @@ export default function App() {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
     setReport(null); setResult(null); setHighlight(null);
-    if (area === 'jd') { setCandidates([]); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
+    if (area === 'jd') { setJDInput(''); setCandidates([]); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
     else setCV(null);
     try {
       const document = await readDocument(file);
       if (area === 'jd') setJD(document); else setCV(document);
     } catch (err) { setError({ area, text: message(err) }); if (area === 'cv') setCandidates(rows => [...rows, {name:file.name,result:null,choice:'',note:'',error:message(err)}]); }
     finally { setBusy(null); }
+  }
+  function usePastedJD() {
+    setError(null);
+    if (jdInput.trim().length < 30 || jdInput.length > 80000) {
+      setError({area: 'jd', text: 'Paste between 30 and 80,000 characters of job description text.'});
+      return;
+    }
+    setJD({name: 'Pasted job description', text: jdInput, pages: null});
+    setRequirements([]); setRules({}); setConfirmed(false); setRangesReviewed(false);
+    setCV(null); setCandidates([]); setReport(null); setResult(null); setHighlight(null);
   }
   async function extractRequirements() {
     if (!jd || busy) return;
@@ -114,14 +138,16 @@ export default function App() {
         {['Add a job description', 'Confirm requirements', 'Review one candidate'].map((label, index) => <li key={label} aria-current={step === index + 1 ? 'step' : undefined} className={step >= index + 1 ? 'active' : ''}><span>{index + 1}</span>{label}</li>)}
       </ol>
       {configured === false && <aside className="setup-note"><strong>AI is not connected yet.</strong> Add <code>OPENAI_API_KEY</code> in this development deployment’s Convex environment settings. You can still read your files and draft requirements here.<button className="text-button" disabled={!!busy} onClick={async () => { try { setConfigured((await setup({})).configured); } catch { setError({ area: 'jd', text: 'Could not reach Convex. Check your connection, then retry.' }); } }}>Check connection again</button></aside>}
-      <div className="workspace">
+      <div className={`workspace ${jd ? 'has-jd' : ''}`}>
         <div className="role-column">
           <section aria-labelledby="jd-heading" className="panel">
             <div className="section-heading"><h2 id="jd-heading">The job description</h2>{jd && <span className="state-label">Readable</span>}</div>
-            <p>Upload the JD you’re hiring against. You’ll check its requirements before the CV is assessed.</p>
+            <p>Upload or paste the JD you’re hiring against. You’ll check its requirements before the CV is assessed.</p>
             <FilePicker label={jd ? 'Replace job description' : 'Choose job description'} disabled={!!busy} onFile={file => void upload(file, 'jd')} />
+            <label className="paste-jd">Paste job description<textarea aria-label="Paste job description" value={jdInput} disabled={!!busy} rows={6} placeholder="Paste the full job description here" onChange={event => setJDInput(event.target.value)} /></label>
+            <button className="secondary" disabled={!!busy || !jdInput.trim()} onClick={usePastedJD}>Use pasted JD</button>
             {errorFor('jd')}
-            {jd && <><div className="file-summary"><strong>{jd.name}</strong><span>{jd.pages ? `${jd.pages} pages · ` : ''}{jd.text.length.toLocaleString()} characters read</span></div><DocumentText document={jd} />
+            {jd && <><div className="file-summary"><strong>{jd.name}</strong><span>{jd.pages ? `${jd.pages} pages · ` : ''}{jd.text.length.toLocaleString()} characters read</span></div><DocumentText document={jd} expanded />
               {!confirmed && <button className="primary" disabled={!!busy} onClick={() => void extractRequirements()}>{requirements.length ? 'Extract requirements again' : 'Extract requirements'}</button>}
             </>}
           </section>
@@ -160,7 +186,7 @@ export default function App() {
               {cv && <><div className="file-summary"><strong>{cv.name}</strong><span>{cv.text.length.toLocaleString()} characters read</span></div><DocumentText document={cv} highlight={highlight} /><button className="primary" disabled={!!busy} onClick={() => void assessCandidate()}>{report ? 'Assess this CV again' : 'Assess this CV'}</button></>}
             </>}
           </section>
-          {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><p>App recommendation: <strong>{candidate.result.recommendation}</strong></p><p>{candidate.result.reason} Coverage: {candidate.result.coverage}%.</p>{candidate.result.missingMustHaves.map(text => <p key={text}>Missing must-have CV evidence: {text}</p>)}<label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
+          {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><RecommendationBullets result={candidate.result} requirements={requirements} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
             <h2 id="evidence-heading">Evidence for this candidate</h2>{result && <p><strong>{result.recommendation}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>

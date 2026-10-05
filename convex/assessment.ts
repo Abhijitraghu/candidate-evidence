@@ -133,7 +133,9 @@ export const recommendCandidate = action({
   returns: v.object({ evidence: v.array(evidence), recommendation: v.union(v.literal('Move to next round'), v.literal('Maybe'), v.literal('Not now')), coverage: v.number(), missingMustHaves: v.array(v.string()), reason: v.string(), ruleVersion: v.string() }),
   handler: async (_, {cvText, requirements}) => {
     validateText(cvText);
-    if (!requirements.length || requirements.length > 40 || requirements.some(r => r.text.length > 1000 || r.groups.length > 50 || r.groups.some(g => g.length > 30 || g.some(t => !t.trim() || t.length > 200)))) throw new ConvexError('Review between 1 and 40 bounded evidence rules.');
+    if (!requirements.length || requirements.length > 40) throw new ConvexError('Confirm between 1 and 40 requirements before assessing the CV.');
+    const invalid = requirements.findIndex(r => !r.text.trim() || r.text.length > 1000 || r.groups.length > 50 || r.groups.some(g => !g.length || g.length > 30 || g.some(t => !t.trim() || t.length > 200)));
+    if (invalid !== -1) throw new ConvexError(`Review requirement ${invalid + 1}: keep its text under 1,000 characters and each CV evidence phrase under 200 characters.`);
     try { return recommend(requirements, cvText); } catch (error) { throw new ConvexError(error instanceof Error ? error.message : 'Review the evidence rules.'); }
   },
 });

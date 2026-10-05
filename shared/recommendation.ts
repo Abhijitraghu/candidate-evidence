@@ -1,6 +1,6 @@
 import type { Requirement, VerifiedEvidence } from './evidence.ts';
 
-export const RULE_VERSION = '2.1.0';
+export const RULE_VERSION = '2.2.0';
 export const labels = ['Move to next round', 'Maybe', 'Not now'] as const;
 export type Recommendation = typeof labels[number];
 export type EvidenceRule = Requirement & { groups: string[][]; interviewOnly: boolean; assessmentMonth?: string };
@@ -33,19 +33,29 @@ const concepts: [RegExp, string[]][] = [
   [/Information Technology, Computer Science/i, ['information technology', 'computer science', 'B.Tech', 'B.E']],
   [/certifications/i, ['certified', 'certification', 'CompTIA']],
 ];
+function generalGroups(text: string): string[][] {
+  // Draft phrases for unfamiliar roles, rather than matching an entire JD sentence.
+  const filler = new Set('a an the and or with in of to for as at is are be have has must required mandatory essential minimum preferred desirable experience experienced knowledge familiarity skills skill ability strong excellent proficient proficiency working work using use years year building developing development applications'.split(' '));
+  const words = [...new Set((text.match(/[\p{L}\p{N}][\p{L}\p{N}+#.-]*/gu) ?? []).map(word => word.replace(/[.]$/, '')).filter(word => !filler.has(word.toLowerCase())))];
+  // Long words remain visible as bounded pieces. Group adjacent words if necessary.
+  const terms = words.flatMap(word => word.match(/.{1,200}/gu) ?? []);
+  if (terms.length <= 50) return terms.map(term => [term]);
+  const groups: string[][] = [];
+  for (const term of terms) {
+    const last = groups.at(-1);
+    if (last && last[0].length + term.length + 1 <= 100) last[0] += ` ${term}`;
+    else groups.push([term]);
+  }
+  return groups;
+}
 export function draftRule(requirement: Requirement): EvidenceRule {
   const interviewOnly = /communication|culture|personality|analytical skills/i.test(requirement.text);
   const groups = concepts.filter(([pattern]) => pattern.test(requirement.text)).map(([, terms]) => terms);
-  return { ...requirement, mustHave: interviewOnly ? false : requirement.mustHave, groups: groups.length ? groups : [[requirement.text.replace(/[.]$/, '').trim()]], interviewOnly };
+  return { ...requirement, mustHave: interviewOnly ? false : requirement.mustHave, groups: groups.length ? groups : generalGroups(requirement.text), interviewOnly };
 }
-// The recruiter approved these defaults for this role; original JD source quotes stay intact.
+// Every new role keeps its own wording and conflicting ranges for recruiter review.
 export function approvedRequirements<T extends Requirement>(rows: T[]): T[] {
-  const widerExists = rows.some(row => /1\s*[-–]\s*7\s*years/i.test(row.text));
-  return rows.filter(row => !(widerExists && /1\s*[-–]\s*3\s*years/i.test(row.text))).map(row => ({
-    ...row,
-    text: row.text.replace(/1\s*[-–]\s*3\s*years/gi, '1-7 years'),
-    mustHave: draftRule(row).interviewOnly ? false : row.mustHave,
-  }));
+  return rows.map(row => ({...row, mustHave: draftRule(row).interviewOnly ? false : row.mustHave}));
 }
 export function ruleText(rule: EvidenceRule): string { return rule.groups.map(group => group.join(' / ')).join('; '); }
 export function parseGroups(text: string): string[][] { return text.split(';').map(group => group.split('/').map(term => term.trim()).filter(Boolean)).filter(group => group.length); }
@@ -87,8 +97,8 @@ export function recommend(requirements: EvidenceRule[], cv: string): CandidateRe
   const eligible = requirements.filter(r => !r.interviewOnly);
   const points = evidence.reduce((sum, row) => sum + (row.status === 'found' ? 1 : row.status === 'partial' ? .5 : 0), 0);
   const coverage = eligible.length ? Math.round(points / eligible.length * 10000) / 100 : 0;
-  const missingMustHaves = eligible.filter(r => r.mustHave && evidence.find(row => row.requirementId === r.id)!.status === 'not_found' || (r.mustHave && evidence.find(row => row.requirementId === r.id)!.status === 'conflicting')).map(r => r.text);
+  const missingMustHaves = eligible.filter(r => r.mustHave && evidence.find(row => row.requirementId === r.id)!.status !== 'found').map(r => r.text);
   const allMust = eligible.filter(r => r.mustHave).every(r => evidence.find(row => row.requirementId === r.id)!.status === 'found');
-  const recommendation: Recommendation = missingMustHaves.length ? 'Not now' : allMust && coverage >= 80 ? 'Move to next round' : 'Maybe';
-  return { evidence, recommendation, coverage, missingMustHaves, ruleVersion: RULE_VERSION, reason: missingMustHaves.length ? 'A confirmed must-have has no matching CV evidence or an explicit negative claim. Review wording and context before deciding.' : recommendation === 'Move to next round' ? 'Every CV-checkable must-have has full evidence and requirement coverage is at least 80%.' : 'Partial evidence or coverage below 80% needs recruiter review.' };
+  const recommendation: Recommendation = missingMustHaves.length || (eligible.length > 0 && coverage === 0) ? 'Not now' : allMust && coverage >= 80 ? 'Move to next round' : 'Maybe';
+  return { evidence, recommendation, coverage, missingMustHaves, ruleVersion: RULE_VERSION, reason: missingMustHaves.length ? 'A confirmed must-have is not fully supported by CV evidence. Review wording and context before deciding.' : recommendation === 'Not now' ? 'No CV-checkable requirement has supporting evidence. Review wording before deciding.' : recommendation === 'Move to next round' ? 'Every CV-checkable must-have has full evidence and requirement coverage is at least 80%.' : 'Partial evidence or coverage below 80% needs recruiter review.' };
 }
