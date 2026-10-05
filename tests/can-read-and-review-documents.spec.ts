@@ -14,7 +14,7 @@ async function word(text: string) {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 const docxType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-async function simulateActions(page: Page) {
+async function simulateActions(page: Page, failedAssessment = false) {
   let extractionFailed = false;
   await page.routeWebSocket(/\/sync(?:\?|$)/, socket => {
     socket.onMessage(message => {
@@ -35,8 +35,11 @@ async function simulateActions(page: Page) {
         ];
       } else if (request.udfPath === 'assessment:assessCandidate') {
         const { requirements, cvText } = request.args[0];
-        result = { model: 'synthetic-test-response', evidence: verifyEvidence(requirements, cvText, [
-          { requirementId: 'sql', status: 'found', quotes: ['Built monthly reports with SQL at Example Company.'], explanation: 'Synthetic test interpretation: the CV claims SQL reporting work.', question: 'Which reports did you build?' },
+        result = { model: 'synthetic-test-response', evidence: verifyEvidence(requirements, cvText, failedAssessment ? [
+          { requirementId: 'sql', status: 'found', quotes: ['A fabricated quote'], explanation: 'Unsupported', question: '' },
+          { requirementId: 'python', status: 'partial', quotes: [], explanation: 'Unsupported', question: '' },
+        ] : [
+          { requirementId: 'sql', status: 'found', quotes: ['Built monthly reports with SQL at Example Company.'], explanation: 'Synthetic test interpretation: the CV claims SQL reporting work (p1).', question: 'Which reports did you build?' },
           { requirementId: 'python', status: 'not_found', quotes: [], explanation: '', question: 'Have you used Python?' },
           { requirementId: 'communication', status: 'needs_checking', quotes: [], explanation: 'Communication needs a recruiter call.', question: 'Walk me through a recent project.' },
         ]) };
@@ -49,10 +52,13 @@ async function simulateActions(page: Page) {
 test('review screen handles errors, evidence, highlights and requirement edits using synthetic responses', async ({ page }) => {
   await simulateActions(page);
   await page.goto('/');
-  await page.getByLabel('Choose job description').setInputFiles({ name: 'synthetic-jd.docx', mimeType: docxType, buffer: await word('Backend role. Required: SQL experience. Desirable: Python experience. Communication must be checked in a recruiter call.') });
+  await page.getByLabel('Choose job description').setInputFiles({ name: 'synthetic-jd.docx', mimeType: docxType, buffer: await word('Backend role. Required: SQL experience. Desirable: Python experience. Communication must be checked in a recruiter call. Experience: 1-7 years. Qualifications: 1-3 years.') });
   await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Synthetic test: OpenAI usage limit');
   await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
+  await expect(page.getByText(/The JD contains different experience ranges/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeDisabled();
+  await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).check();
   await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
   const cv = 'Example Applicant. ' + 'Additional synthetic CV content. '.repeat(45) + 'Built monthly reports with SQL at Example Company. No other claims are made in this synthetic document.';
@@ -60,6 +66,7 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Evidence for this candidate' })).toBeVisible();
   await expect(page.getByText('Evidence found', { exact: true })).toBeVisible();
+  await expect(page.getByText('Synthetic test interpretation: the CV claims SQL reporting work.', { exact: true })).toBeVisible();
   await expect(page.getByText('Not found in CV', { exact: true })).toBeVisible();
   await expect(page.getByText('Needs checking', { exact: true })).toBeVisible();
   await expect(page.locator('.activity')).toBeHidden();
@@ -86,6 +93,25 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeDisabled();
 });
 
+test('failed verification explains each cause without showing a zero-evidence candidate assessment', async ({ page }) => {
+  await simulateActions(page, true);
+  await page.goto('/');
+  await page.getByLabel('Choose job description').setInputFiles({ name: 'jd.docx', mimeType: docxType, buffer: await word('A synthetic backend role requiring SQL experience and Python experience.') });
+  await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
+  await page.getByLabel('Choose candidate CV').setInputFiles({ name: 'cv.docx', mimeType: docxType, buffer: await word('An example applicant who claims SQL reporting experience in a synthetic CV.') });
+  await page.getByRole('button', { name: 'Assess this CV', exact: true }).click();
+  await expect(page.getByText('No verified assessment is available. Retry the assessment; you can still read the CV.')).toBeVisible();
+  await expect(page.getByText(/a quote that did not match/)).toBeVisible();
+  await expect(page.getByText(/claim without a supporting quote/)).toBeVisible();
+  await expect(page.getByText(/did not return an answer/)).toBeVisible();
+  await expect(page.getByText(/0 of 3 requirements/)).toHaveCount(0);
+  await expect(page.getByText('A fabricated quote', { exact: true })).toHaveCount(0);
+});
+
 test('reads every private Word CV and a PDF JD, and clears unreadable replacements without AI calls', async ({ page }) => {
   const directory = path.resolve('test-cvs');
   const files: string[] = await readdir(directory, { encoding: 'utf8' }).catch(() => [] as string[]);
@@ -98,6 +124,7 @@ test('reads every private Word CV and a PDF JD, and clears unreadable replacemen
   expect((await page.locator('.role-column pre').textContent())!.length).toBeGreaterThan(30);
   await page.getByRole('button', { name: 'Add a requirement' }).click();
   await page.getByLabel('Requirement 1', { exact: true }).fill('Recruiter-confirmed requirement for file-reading test');
+  await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).check();
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
   for (let i = 0; i < wordFiles.length; i++) {
     await page.getByLabel(i === 0 ? 'Choose candidate CV' : 'Replace candidate CV').setInputFiles(path.join(directory, wordFiles[i]));

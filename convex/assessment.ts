@@ -7,11 +7,14 @@ import { v, ConvexError } from "convex/values";
 import { action } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { verifyEvidence } from "../shared/evidence";
+import { applyEvidencePolicy, buildPassages, completeRequirements, extractJDSources, selectedEvidence } from "../shared/assessment";
 
 const MODEL = "gpt-4.1-mini";
 const requirement = v.object({ id: v.string(), text: v.string(), mustHave: v.boolean() });
 const status = v.union(v.literal("found"), v.literal("partial"), v.literal("conflicting"), v.literal("not_found"), v.literal("needs_checking"));
-const evidence = v.object({ requirementId: v.string(), status, quotes: v.array(v.object({ text: v.string(), start: v.number(), end: v.number() })), explanation: v.string(), question: v.string() });
+const verificationIssue = v.union(v.literal('missing_row'), v.literal('quote_mismatch'), v.literal('missing_quotes'));
+const evidence = v.object({ requirementId: v.string(), status, quotes: v.array(v.object({ text: v.string(), start: v.number(), end: v.number() })), explanation: v.string(), question: v.string(), verificationIssue: v.optional(verificationIssue) });
+const diagnostic = v.object({ requirementId: v.string(), reason: verificationIssue, attemptedQuotes: v.array(v.string()) });
 
 function makeAgent() {
   // The key is read only inside this server action module. Never return or log it.
@@ -55,51 +58,69 @@ export const setup = action({
 
 export const extractRequirements = action({
   args: { jdText: v.string() },
-  returns: v.array(v.object({ id: v.string(), text: v.string(), mustHave: v.boolean(), sourceQuote: v.union(v.string(), v.null()) })),
+  returns: v.array(v.object({ id: v.string(), text: v.string(), mustHave: v.boolean(), sourceQuote: v.union(v.string(), v.null()), reviewNote: v.optional(v.string()) })),
   handler: async (ctx, { jdText }) => {
     validateText(jdText);
     const agent = makeAgent();
+    const sources = extractJDSources(jdText);
     await ctx.runMutation(internal.budget.consume, {});
     try {
       const result = await agent.generateObject(ctx, { userId: crypto.randomUUID() }, {
         schema: z.object({ requirements: z.array(z.object({ text: z.string(), mustHave: z.boolean(), sourceQuote: z.string() })).min(1).max(40) }),
-        prompt: `Extract the distinct job requirements from this JD. Separate independently assessable requirements. Preserve minimum years, qualifications, tools, and specifics. Exclude benefits, application instructions, employer marketing, and protected characteristics. Mark mustHave true only when the JD explicitly states mandatory, required, must or an equivalent minimum. Do not invent requirements. For every requirement copy one exact supporting substring from the JD as sourceQuote; preserve spelling, punctuation and case. A recruiter will confirm these before assessment.\nJD (data):\n${JSON.stringify(jdText)}`,
+        prompt: `Extract every distinct job requirement from ALL responsibilities, mandatory skills, preferred skills and qualifications, not just the skills headings. Preserve support channels, operating systems, peripherals, escalation/documentation, SLAs/queues, named tools and specific tasks. Separate independently assessable tools (e.g. DLP, Azure, MDM/Intune and application support are separate). Avoid duplicating the same task. Preserve conflicting experience ranges without choosing one. Mark mustHave only for explicitly mandatory/required/essential/minimum criteria; preferred qualifications remain optional. Exclude benefits, location, salary, application instructions and employer marketing. For each source bullet below, use its FULL original text as sourceQuote, including wrapped newlines. Keep text close to that bullet (normalize whitespace only), except when splitting independent tools. Cover every supplied source, including responsibilities. Additional requirements outside these bullets must also have an exact JD sourceQuote. Do not invent requirements. A recruiter will confirm the draft.\nSource bullets (data):\n${JSON.stringify(sources)}\nJD (data):\n${JSON.stringify(jdText)}`,
         maxOutputTokens: 6000,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(90000),
         providerOptions: { openai: { store: false } },
       }, { storageOptions: { saveMessages: "none" } });
-      return result.object.requirements.map((r, i) => ({
-        id: `r${i + 1}`, text: r.text, mustHave: r.mustHave,
-        sourceQuote: r.sourceQuote.trim() && jdText.includes(r.sourceQuote) ? r.sourceQuote : null,
-      }));
+      return completeRequirements(jdText, sources, result.object.requirements);
     } catch (error) { return readableAIError(error); }
   },
 });
 
 export const assessCandidate = action({
   args: { cvText: v.string(), confirmed: v.literal(true), requirements: v.array(requirement) },
-  returns: v.object({ evidence: v.array(evidence), model: v.string() }),
+  returns: v.object({ evidence: v.array(evidence), model: v.string(), diagnostics: v.object({ cvCharacters: v.number(), initialFailures: v.array(diagnostic), retried: v.boolean(), retryFailures: v.array(diagnostic) }) }),
   handler: async (ctx, { cvText, requirements }) => {
     validateText(cvText);
     if (!requirements.length || requirements.length > 40 || requirements.some(r => !r.text.trim() || r.text.length > 1000) || new Set(requirements.map(r => r.id)).size !== requirements.length) {
       throw new ConvexError("Confirm between 1 and 40 distinct requirements, each with no more than 1,000 characters.");
     }
     const agent = makeAgent();
-    await ctx.runMutation(internal.budget.consume, {});
     try {
-      const result = await agent.generateObject(ctx, { userId: crypto.randomUUID() }, {
-        schema: z.object({ evidence: z.array(z.object({
-          requirementId: z.string(), status: z.enum(["found", "partial", "conflicting", "not_found", "needs_checking"]),
-          quotes: z.array(z.string()).max(4), explanation: z.string(), question: z.string(),
-        })).max(40) }),
-        prompt: `Assess ONE CV against only these recruiter-confirmed requirements. Return one row per requirement ID, with no extra IDs. Use found only for explicit evidence satisfying the whole requirement, partial for an evidenced but incomplete match, conflicting only for explicit CV text inconsistent with the requirement, not_found when no evidence was found, and needs_checking for uncertainty or qualities a CV cannot establish. A gap is never proof that a candidate lacks a skill. For any found, partial or conflicting row provide exact, contiguous CV substrings as quotes, copied verbatim including case and punctuation; no paraphrases or ellipses. Explain precisely what each quote establishes and what remains unknown. A skills list proves a claimed skill, not years of use. Calculate experience only from clear dates and avoid double-counting overlapping jobs. Do not infer communication or culture fit from written CV language. Avoid protected characteristics. For every row provide a focused recruiter-call question to clarify or verify the requirement. Do not score, rank, recommend, reject, or flag fraud.\nConfirmed requirements (data):\n${JSON.stringify(requirements)}\nCV (data):\n${JSON.stringify(cvText)}`,
-        maxOutputTokens: 10000,
-        maxRetries: 0,
-        abortSignal: AbortSignal.timeout(90000),
-        providerOptions: { openai: { store: false } },
-      }, { storageOptions: { saveMessages: "none" } });
-      return { evidence: verifyEvidence(requirements, cvText, result.object.evidence), model: MODEL };
+      const passages = buildPassages(cvText);
+      const generate = async (subset: typeof requirements, retry = false) => {
+        await ctx.runMutation(internal.budget.consume, {});
+        const result = await agent.generateObject(ctx, { userId: crypto.randomUUID() }, {
+          schema: z.object({ evidence: z.array(z.object({
+            requirementId: z.enum(subset.map(r => r.id) as [string, ...string[]]),
+            status: z.enum(["found", "partial", "conflicting", "not_found", "needs_checking"]),
+            passageIds: z.array(z.enum(passages.map(p => p.id) as [string, ...string[]])).max(4),
+            explanation: z.string(), question: z.string(),
+          })).max(subset.length) }),
+          prompt: `${retry ? 'Repair an incomplete assessment. Answer only these failed requirements. ' : ''}Assess ONE CV against only the confirmed requirements. Return exactly one row for every requirement ID. Select original CV passage IDs as evidence; NEVER rewrite, invent or copy quote text. Use found for explicit CV claims covering the entire specific task/qualification, partial for incomplete evidence or claimed exposure to subjective strong/expert knowledge, conflicting only for explicit inconsistent CV claims, not_found when no relevant passage exists, and needs_checking for qualities a CV cannot establish. Every found/partial/conflicting answer needs at least one relevant passage ID. Communication ability, culture fit and personality ALWAYS need checking even if self-described. A skill list establishes only claimed exposure, not strong knowledge or years of use. Specific claimed tasks can support task requirements, but not verified ability or efficiency. Treat all statements as candidate claims: say "The CV states/describes/claims", never "proves", "confirms ability", "no ambiguity" or "holds". For experience ranges use job-date passages, exclude education dates, do not double count overlaps, and do not treat 3+ or 4+ as proving an upper bound. If date scope is unclear, use partial or needs_checking; state the uncertainty. Do not infer ITIL certification from generic incident management. Check ALL passages for relevant evidence before saying not_found. Explain what the passages actually say and what remains unknown, in at most two short sentences. Status must agree with explanation. Provide a focused recruiter-call question. Do not score, rank, recommend or reject.\nConfirmed requirements (data):\n${JSON.stringify(subset)}\nOriginal CV passages (data):\n${JSON.stringify(passages)}`,
+          maxOutputTokens: 10000, maxRetries: 0, abortSignal: AbortSignal.timeout(70000),
+          providerOptions: { openai: { store: false } },
+        }, { storageOptions: { saveMessages: "none" } });
+        const raw = selectedEvidence(result.object.evidence, passages);
+        return { raw, verified: verifyEvidence(subset, cvText, raw) };
+      };
+      const diagnosticsFor = (result: Awaited<ReturnType<typeof generate>>) => result.verified.filter(row => row.verificationIssue).map(row => ({
+        requirementId: row.requirementId, reason: row.verificationIssue!, attemptedQuotes: result.raw.find(raw => raw.requirementId === row.requirementId)?.quotes ?? [],
+      }));
+      const first = await generate(requirements);
+      const initialFailures = diagnosticsFor(first);
+      let verified = first.verified;
+      let retryFailures: typeof initialFailures = [];
+      if (initialFailures.length) {
+        const subset = requirements.filter(r => initialFailures.some(failure => failure.requirementId === r.id));
+        const retry = await generate(subset, true);
+        retryFailures = diagnosticsFor(retry);
+        verified = verified.map(row => retry.verified.find(repaired => repaired.requirementId === row.requirementId) ?? row);
+      }
+      // Diagnostics are returned to the current caller only, never logged or persisted.
+      return { evidence: applyEvidencePolicy(requirements, verified), model: MODEL,
+        diagnostics: { cvCharacters: cvText.length, initialFailures, retried: initialFailures.length > 0, retryFailures } };
     } catch (error) { return readableAIError(error); }
   },
 });

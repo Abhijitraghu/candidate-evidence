@@ -25,7 +25,7 @@ Never put this key in frontend code, a `VITE_` variable, a committed file, or a 
 
 1. Choose **test-cvs/JD.pdf** as the job description.
 2. Open **Read extracted text** and compare it with the original JD.
-3. Click **Extract requirements**. Check each requirement and its supporting JD quote. Edit wording, add missing requirements, remove irrelevant ones, and select the must-haves. Blank requirements prevent confirmation.
+3. Click **Extract requirements**. Check each requirement and its supporting JD quote. Edit wording, add missing requirements, remove irrelevant ones, and select the must-haves. Blank requirements prevent confirmation. Different experience ranges in the JD appear as a warning that must be reviewed before confirmation; acknowledging it does not resolve the conflict.
 4. Click **Confirm requirements**. The CV upload appears only after this step.
 5. Choose one `.docx` CV from **test-cvs/**, then click **Assess this CV**.
 6. Check the evidence row for every confirmed requirement. Click **See this quote in the CV** to highlight its exact location in the extracted text. Compare a few quotes against the original file too.
@@ -41,7 +41,7 @@ PDFs must have readable text. Image-only/scanned pages and password-protected PD
 - File text is sent through Convex to OpenAI when you extract requirements or assess a CV. The raw files are not uploaded to Convex storage.
 - The agent is configured not to save prompt/output messages. OpenAI requests use `store: false`; provider retention policies still apply.
 - A shared request counter, containing no document text, limits this development demo to 30 paid AI requests per hour. There are no private accounts in this milestone; use locally for testing.
-- Every displayed CV quote is checked against the extracted CV text, case-sensitively. Claims with invalid quotes become **Needs checking**. Matching quotes do not prove the AI's interpretation is correct; the recruiter test checks that.
+- Every displayed CV quote is checked against the extracted CV text, case-sensitively. The AI selects numbered original passages; the server supplies the unchanged quotes. Missing answer rows, unmatched quotes and evidence claims without quotes have separate **Needs checking** explanations. Only failed rows get one bounded repair attempt; each paid attempt counts against the request limit. If every row fails, the screen says the assessment is incomplete rather than presenting a zero-evidence assessment. Matching quotes do not prove the AI's interpretation is correct; the recruiter test checks that.
 - `test-cvs/`, `.env*`, installed packages, build output, test output, and local screenshots are ignored by git. Local checks and screenshots containing CV data must stay in those ignored folders.
 
 ## Checks
@@ -52,11 +52,21 @@ npm run build
 npm run test:browser
 ```
 
-Current handoff: see NEXT_STEPS.md. Live OpenAI assessment is awaiting API credits. The separate simulated-screen checks pass; they are not a live AI pass.
+Current handoff: see NEXT_STEPS.md. Credits work and the live AI checks pass. Interpretation quality still needs recruiter review; passing quote checks does not prove a correct assessment.
 
-The live browser check uses installed Google Chrome and the real `test-cvs/JD.pdf` plus the first `.docx` in that folder. It makes two real OpenAI calls, so the dev key and OpenAI billing must be ready. It checks confirmation, edits, quote fidelity, uncertainty about communication, and recovery from an unreadable replacement. It skips when the private test files are absent. It does not record document contents in committed fixtures, traces, or screenshots.
+Browser tests start their own local server on port 5174. The live browser check uses installed Google Chrome and the real `test-cvs/JD.pdf` plus the first `.docx` in that folder. It normally makes two real OpenAI calls, plus at most one repair call for failed assessment rows, so the dev key and OpenAI billing must be ready. It checks confirmation, edits, quote fidelity, uncertainty about communication, and recovery from an unreadable replacement. It skips when the private test files are absent. It does not record document contents in committed fixtures, traces, or screenshots.
 
 To check uploads and the review screen without paid AI calls, run `npx playwright test can-read-and-review-documents.spec.ts`. These checks use synthetic action responses and also verify parsing of all private Word CVs.
+
+## Evidence and requirement checks
+
+- The extractor considers responsibilities as well as skills and qualifications. Original bullets under recognized section headings and labeled experience lines are checked for coverage. Uncovered lines are restored with their original quote and a review note. Unusual JD formats still need manual review.
+- Independent tools in lists are separated. The JD's different experience ranges remain visible for recruiter clarification.
+- Strong knowledge and analytical quality are treated as partial evidence when a CV claims related skills or tasks. Communication quality and culture fit always need checking.
+- Month-based job dates are counted with overlaps merged. Education dates are excluded. Dates near a range boundary remain uncertain, and an out-of-range duration prompts clarification rather than an automatic rejection.
+- Specific DLP, Azure, MDM/Intune and application-support claims are checked for explicit mentions in the selected passages. Exact quotes still do not guarantee correct interpretation of other tasks.
+- Diagnostics are returned to the current caller only, including text length and the failed-row reason; document and output text are not logged or saved in Convex tables.
+- The normal request limit remains 30 per hour. For an authorized development verification run, `AI_TEST_REQUEST_LIMIT` can temporarily raise it to at most 60. Remove that development variable after testing. It is not configured in production.
 
 ## Agreed limits
 

@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { ConvexError } from "convex/values";
 import { api } from "../convex/_generated/api";
 import { readDocument, type ReadDocument } from "./lib/documents";
-import type { Requirement, VerifiedEvidence, EvidenceStatus } from "../shared/evidence";
+import type { VerifiedEvidence, EvidenceStatus } from "../shared/evidence";
+import { displayExplanation, experienceWarnings, type DraftRequirement } from "../shared/assessment";
 
-type DraftRequirement = Requirement & { sourceQuote: string | null };
 const statusLabels: Record<EvidenceStatus, string> = {
   found: 'Evidence found', partial: 'Partial evidence', conflicting: 'Conflicting evidence',
   not_found: 'Not found in CV', needs_checking: 'Needs checking',
@@ -41,6 +41,7 @@ export default function App() {
   const [cv, setCV] = useState<ReadDocument | null>(null);
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
   const [confirmed, setConfirmed] = useState(false);
+  const [rangesReviewed, setRangesReviewed] = useState(false);
   const [report, setReport] = useState<VerifiedEvidence[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ area: string; text: string } | null>(null);
@@ -59,7 +60,7 @@ export default function App() {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
     setReport(null); setHighlight(null);
-    if (area === 'jd') { setJD(null); setRequirements([]); setConfirmed(false); setCV(null); }
+    if (area === 'jd') { setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
     else setCV(null);
     try {
       const document = await readDocument(file);
@@ -72,14 +73,14 @@ export default function App() {
     setBusy('Finding requirements in the JD…'); setError(null); setReport(null);
     try {
       const draft = await extract({ jdText: jd.text });
-      setRequirements(draft); setConfirmed(false); setConfigured(true);
+      setRequirements(draft); setConfirmed(false); setRangesReviewed(false); setConfigured(true);
       requirementsRef.current?.focus();
     } catch (err) { setError({ area: 'jd', text: message(err) }); }
     finally { setBusy(null); }
   }
   function editRequirement(id: string, change: Partial<DraftRequirement>) {
     setRequirements(rows => rows.map(row => row.id === id ? { ...row, ...change } : row));
-    setReport(null);
+    setReport(null); setRangesReviewed(false);
   }
   async function assessCandidate() {
     if (!cv || !confirmed || busy) return;
@@ -92,6 +93,8 @@ export default function App() {
     finally { setBusy(null); }
   }
   const step = confirmed ? 3 : jd ? 2 : 1;
+  const rangeWarnings = jd ? experienceWarnings([jd.text]) : [];
+  const failedRows = report?.filter(row => row.verificationIssue).length ?? 0;
   const valid = requirements.length > 0 && requirements.length <= 40 && requirements.every(row => row.text.trim().length > 0 && row.text.length <= 1000);
   const errorFor = (area: string) => error?.area === area ? <div className="error" role="alert">{error.text}</div> : null;
 
@@ -117,6 +120,8 @@ export default function App() {
           {jd && <section ref={requirementsRef} tabIndex={-1} aria-labelledby="requirements-heading" className="panel requirements-panel">
             <div className="section-heading"><h2 id="requirements-heading">{confirmed ? 'Confirmed requirements' : 'Check the requirements'}</h2>{confirmed && <span className="state-label">Confirmed</span>}</div>
             <p>{confirmed ? 'This candidate will be assessed against these requirements only.' : 'Correct anything the AI missed. Add specific requirements, remove irrelevant ones, and mark the must-haves.'}</p>
+            {rangeWarnings.map(warning => <p className="evidence-note" key={warning}>{warning}</p>)}
+            {!confirmed && rangeWarnings.length > 0 && <label className="checkbox"><input type="checkbox" checked={rangesReviewed} disabled={!!busy} onChange={event => setRangesReviewed(event.target.checked)} />I have reviewed the conflicting experience ranges.</label>}
             {requirements.length === 0 && <p className="empty-hint">Extract from the JD above, or add requirements yourself.</p>}
             <div className="requirement-list">{requirements.map((row, index) => <div className="requirement" key={row.id}>
               <label className="requirement-label" htmlFor={`requirement-${row.id}`}>Requirement {index + 1}</label>
@@ -125,10 +130,11 @@ export default function App() {
                 {!confirmed && <button className="text-button" disabled={!!busy} aria-label={`Remove requirement ${index + 1}`} onClick={() => setRequirements(rows => rows.filter(item => item.id !== row.id))}>Remove</button>}
               </div>
               {row.sourceQuote ? <details className="source-quote"><summary>Supporting JD quote</summary><blockquote>{row.sourceQuote}</blockquote></details> : <small>Added or edited by you, or no exact JD quote verified. Check against the role.</small>}
+              {row.reviewNote && <small>{row.reviewNote}</small>}
             </div>)}</div>
             {!confirmed && <button className="secondary" disabled={!!busy || requirements.length >= 40} onClick={() => setRequirements(rows => [...rows, { id: crypto.randomUUID(), text: '', mustHave: false, sourceQuote: null }])}>Add a requirement</button>}
             <div className="confirmation">
-              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setReport(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
+              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setReport(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid || (rangeWarnings.length > 0 && !rangesReviewed)} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
             </div>
           </section>}
         </div>
@@ -144,12 +150,13 @@ export default function App() {
           </section>
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
             <h2 id="evidence-heading">Evidence for this candidate</h2><p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
-            <p className="report-summary">{report.filter(row => row.status === 'found').length} of {requirements.length} requirements have supporting evidence. This is not a match score.</p>
+            <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
+            {failedRows > 0 && <p className="evidence-note" role="status">The assessment is incomplete: {failedRows} requirements could not be verified. Each affected row explains why. This does not establish that the candidate lacks those skills.</p>}
             {report.map(row => { const requirement = requirements.find(r => r.id === row.requirementId)!; return <article className="evidence-row" key={row.requirementId}>
               <div className="evidence-title"><h3>{requirement.text}</h3>{requirement.mustHave && <span className="must-have">Must-have</span>}</div>
               <span className={`evidence-status status-${row.status}`}>{statusLabels[row.status]}</span>
               {row.quotes.map((quote, index) => <div className="cv-quote" key={index}><blockquote>{quote.text}</blockquote><button className="text-button" onClick={() => { setHighlight({ start: quote.start, end: quote.end }); cvRef.current?.scrollIntoView({ behavior: 'instant', block: 'start' }); }}>See this quote in the CV</button></div>)}
-              <p>{row.explanation}</p><div className="call-question"><strong>Ask in a recruiter call</strong><p>{row.question}</p></div>
+              <p>{displayExplanation(row.explanation)}</p><div className="call-question"><strong>Ask in a recruiter call</strong><p>{displayExplanation(row.question)}</p></div>
             </article>; })}
           </section>}
         </div>

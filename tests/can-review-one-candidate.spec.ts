@@ -18,9 +18,13 @@ test('recruiter confirms a JD before inspecting exact evidence for one CV', asyn
   await expect(page.getByRole('button', { name: 'Extract requirements', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Extract requirements', exact: true }).click();
   await Promise.race([
-    page.getByRole('button', { name: 'Confirm requirements', exact: true }).waitFor({ state: 'visible', timeout: 120000 }).then(async () => { await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled({ timeout: 120000 }); }),
+    page.getByLabel('Requirement 1', { exact: true }).waitFor({ state: 'visible', timeout: 120000 }).then(async () => { await expect(page.locator('.activity')).toBeHidden({ timeout: 120000 }); }),
     page.getByRole('alert').waitFor({ state: 'visible', timeout: 120000 }).then(async () => { throw new Error(await page.getByRole('alert').innerText()); }),
   ]);
+  if (await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).count()) {
+    await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).check();
+  }
+  await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
   const requirements = page.locator('textarea');
   expect(await requirements.count()).toBeGreaterThan(0);
   const originalText = await requirements.first().inputValue();
@@ -31,6 +35,9 @@ test('recruiter confirms a JD before inspecting exact evidence for one CV', asyn
   await requirements.last().fill('Recruiter call: verify communication ability');
   const editedRequirement = await requirements.count();
   await page.getByRole('checkbox', { name: 'Must-have', exact: true }).last().check();
+  if (await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).count()) {
+    await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).check();
+  }
   await page.getByRole('button', { name: 'Confirm requirements', exact: true }).click();
   await page.getByLabel('Choose candidate CV').setInputFiles(path.join(fixtureDir, cvName!));
   await expect(page.getByRole('button', { name: 'Assess this CV', exact: true })).toBeEnabled();

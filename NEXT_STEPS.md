@@ -1,6 +1,22 @@
 # Milestone 1 handoff
 
-## Latest verification — 5 October 2026
+## Latest fixes and verification — 5 October 2026
+
+- Added distinct reasons for missing answers, unmatched quotes and evidence claims without quotes. All-failed reports now say the assessment is incomplete. Failed rows receive at most one repair attempt.
+- Replaced AI-copied quotes with selection of original CV passages. Server-supplied quotes preserve original words and whitespace and still pass exact matching.
+- Diagnosed the previously zero-evidence CV: its 4,082 characters were read in full. An instrumented repeat of the old approach exposed three quote-copying failures (omitted words, an invented ellipsis, and joined education lines). The original all-15 failure's raw answers were not retained, so its individual historical causes cannot be recovered.
+- Expanded extraction coverage to responsibilities and labeled experience lines; restored uncovered source lines, split independent tools, and added a pre-confirmation warning for different JD experience ranges.
+- Added consistent checks for communication, proficiency, DLP/Azure/tool evidence, and experience-date arithmetic. Original CV claims remain unverified claims; no hiring decision is made.
+- All 17 unit checks, all four browser checks, the build and the development backend update passed. One earlier review-screen rerun timed out after its upload disappeared; its isolated rerun passed, and tests now use their own local server. The final complete browser suite passed.
+- Reran all eight CVs with the final assessment logic. The before/after table uses the same original 15 requirements, while the corrected 28-requirement JD was assessed alongside them in the same calls. All 240 requested rows had no quote-verification or missing-row failures. Private results: `.local-checks/live-before.json`, `.local-checks/live-after.json`, `.local-checks/live-comparison.md`, and `.local-checks/manjunath-diagnosis.json`.
+- On the original 15 checks, the previously zero-evidence CV now has 4 found, 7 partial, 2 not found and 2 needing checks. The two remaining checks concern communication and the narrower experience range; quoted job dates indicate about 43 months.
+- The direct live browser check of that CV passed exact quotes, highlighting, desktop/mobile width checks and visual inspection. Its corrected-list interpretation differed from the batch (12 versus 16 found out of 28), demonstrating remaining AI judgment variability; recruiter review is still required.
+- A bounded development-only request-limit override was used for the paid reruns and removed afterward. The normal 30-call limit remains in place. No CVs, private outputs, screenshots or keys are committed. No push or production deployment was performed.
+
+Next: recruiter review of the saved reports, clarify the JD's experience ranges, and compare judgments and review time. Do not describe milestone 1 as recruiter-validated yet.
+
+
+## Earlier verification — 5 October 2026
 
 Credits now work. The development backend update, all five evidence-validation tests, all three browser tests (including the previously failing synthetic review screen and the real OpenAI flow), and the build passed. Live assessments also completed for all eight Word CVs against the same 15 extracted requirements. Private detailed results and review findings are saved in `.local-checks/live-results.md` and `.local-checks/live-results.json`, excluded from git.
 
