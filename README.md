@@ -75,3 +75,13 @@ To check uploads and the review screen without paid AI calls, run `npx playwrigh
 - Scores, multi-candidate ranking, recruiter flags and overrides, PDF reports, private accounts, and persistence belong to later milestones.
 - Missing evidence is uncertainty. This tool does not verify claims, prove culture fit, detect fraud, recommend hiring, or automatically reject anyone.
 - Commits are local. Nothing is pushed to GitHub or deployed to production automatically.
+
+## Milestone 2 recommendations
+
+The recruiter confirms one JD, its must-haves and explicit CV phrase rules before assessment. A semicolon separates required phrase groups; `/` separates equivalent phrases within a group. All groups must match for full evidence. Draft aliases cover the current service-desk JD; other wording requires recruiter review. CV classification uses `shared/recommendation.ts` in the real Convex action `assessment:recommendCandidate`, without AI calls, cached AI judgments or document persistence. The older milestone 1 AI action remains available for diagnostics but is no longer used by the app.
+
+Full evidence earns 1 point; partial evidence earns 0.5. Communication, culture, personality and analytical quality are drafted as call-only checks, excluded from coverage and must-have gates. Move to next round requires all CV-checkable must-haves plus at least 80% coverage. Missing CV evidence or an explicit negative claim for a must-have means Not now; other uncertainty means Maybe. These labels support recruiter review, never automatic rejection. Phrase matches establish documented claims, not proficiency. Different phrasing can be missed. Unknown requirements initially use their literal text and must be adjusted before confirmation.
+
+Exact CV lines and original character offsets accompany every evidence claim. Limited/learning/negative language remains partial or conflicting. Date calculations merge overlapping month intervals, exclude education lines, and use the explicitly confirmed assessment month for Present. Same CV text, confirmed rules, assessment month and rule version produce identical complete outputs. JD extraction can still vary; confirm and keep one requirement list for comparisons. Conflicting experience ranges must be edited before confirmation.
+
+CVs can be assessed sequentially and remain visible in the current session. Each recommendation retains reasons and missing must-haves. Recruiter choices and notes are separate from the original app recommendation. Changing the JD or reopening requirement editing clears recommendations and choices for fresh review. Refresh clears this session; durable saving is a later milestone. Unreadable CVs remain visible as Unable to assess.

@@ -77,3 +77,14 @@ Supported files are text-based PDF and Word `.docx`. Convert older `.doc` files 
 Working files and results live only in the current browser tab. Refreshing clears them. Requirement extraction and assessment send text through Convex to OpenAI; provider retention policies still apply. This is a local development test, with no deployed production website or account privacy flow yet.
 
 See README.md for the complete local checking instructions. Screenshot review was interrupted by the requested stop after the status-strip issue was identified; a fresh visual check of live evidence is part of the next session.
+
+## Milestone 2 completed — 5 October 2026
+
+- Implemented approved three recommendation groups with fixed phrase rules, must-have gates, 80% coverage, exact evidence, explicit missing must-haves, call-only checks, session recruiter overrides and notes.
+- Conflicting experience ranges must be resolved in confirmed requirements. Date calculations use a confirmed assessment month. CV classification makes no AI call.
+- Two fresh real Convex backend runs on all eight private test-cvs produced deeply identical outputs (every evidence row, quote offset, explanation, coverage and recommendation). Private report: `.local-checks/milestone2-live.md`; full outputs: `.local-checks/milestone2-live.json`.
+- Test scenario retains the JD header's 1–7-year range and removes the conflicting preferred 1–3-year row. October 2026 assessment month; 27 requirements with visible draft phrase rules. This is a test scenario, not recruiter approval of the JD ambiguity or matching vocabulary.
+- Counts in both runs: Move to next round 0; Maybe 1 (Bhavya); Not now 7. Manjunath's full 4,082 characters read; explicit ITIL phrase evidence missing (ITSM/ServiceNow alone does not establish ITIL).
+- 24 unit checks and all 4 browser flows passed, including prior review-screen failure checks, live JD extraction/CV assessment and recruiter override/note controls. Build passed; Convex dev functions pushed. Desktop and phone inspected without horizontal overflow.
+- Temporary bounded AI test limit removed; default 30/hour restored. Private CVs and reports remain ignored. No production deploy or git push.
+- Next: recruiter independently reviews the draft evidence phrases and shortlist. Repeatability is demonstrated; shortlist accuracy and time savings still require recruiter validation.

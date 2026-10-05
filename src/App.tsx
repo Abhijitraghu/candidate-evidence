@@ -6,6 +6,8 @@ import { readDocument, type ReadDocument } from "./lib/documents";
 import type { VerifiedEvidence, EvidenceStatus } from "../shared/evidence";
 import { displayExplanation, experienceWarnings, type DraftRequirement } from "../shared/assessment";
 
+import { draftRule, ruleText, parseGroups, labels, type EvidenceRule, type CandidateResult, type Recommendation } from '../shared/recommendation';
+
 const statusLabels: Record<EvidenceStatus, string> = {
   found: 'Evidence found', partial: 'Partial evidence', conflicting: 'Conflicting evidence',
   not_found: 'Not found in CV', needs_checking: 'Needs checking',
@@ -34,12 +36,16 @@ function DocumentText({ document, highlight }: { document: ReadDocument; highlig
 
 export default function App() {
   const extract = useAction(api.assessment.extractRequirements);
-  const assess = useAction(api.assessment.assessCandidate);
+  const assess = useAction(api.assessment.recommendCandidate);
   const setup = useAction(api.assessment.setup);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [jd, setJD] = useState<ReadDocument | null>(null);
   const [cv, setCV] = useState<ReadDocument | null>(null);
   const [requirements, setRequirements] = useState<DraftRequirement[]>([]);
+  const [rules, setRules] = useState<Record<string, EvidenceRule>>({});
+  const [assessmentMonth, setAssessmentMonth] = useState(new Date().toISOString().slice(0,7));
+  const [candidates, setCandidates] = useState<{name: string; result: CandidateResult | null; choice: Recommendation | ''; note: string; error?: string}[]>([]);
+  const [result, setResult] = useState<CandidateResult | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [rangesReviewed, setRangesReviewed] = useState(false);
   const [report, setReport] = useState<VerifiedEvidence[] | null>(null);
@@ -59,13 +65,13 @@ export default function App() {
   async function upload(file: File, area: 'jd' | 'cv') {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
-    setReport(null); setHighlight(null);
-    if (area === 'jd') { setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
+    setReport(null); setResult(null); setHighlight(null);
+    if (area === 'jd') { setCandidates([]); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
     else setCV(null);
     try {
       const document = await readDocument(file);
       if (area === 'jd') setJD(document); else setCV(document);
-    } catch (err) { setError({ area, text: message(err) }); }
+    } catch (err) { setError({ area, text: message(err) }); if (area === 'cv') setCandidates(rows => [...rows, {name:file.name,result:null,choice:'',note:'',error:message(err)}]); }
     finally { setBusy(null); }
   }
   async function extractRequirements() {
@@ -73,33 +79,35 @@ export default function App() {
     setBusy('Finding requirements in the JD…'); setError(null); setReport(null);
     try {
       const draft = await extract({ jdText: jd.text });
-      setRequirements(draft); setConfirmed(false); setRangesReviewed(false); setConfigured(true);
+      setRequirements(draft); setRules(Object.fromEntries(draft.map(row => [row.id, draftRule(row)]))); setConfirmed(false); setRangesReviewed(false); setConfigured(true);
       requirementsRef.current?.focus();
     } catch (err) { setError({ area: 'jd', text: message(err) }); }
     finally { setBusy(null); }
   }
   function editRequirement(id: string, change: Partial<DraftRequirement>) {
     setRequirements(rows => rows.map(row => row.id === id ? { ...row, ...change } : row));
-    setReport(null); setRangesReviewed(false);
+    setReport(null); setResult(null); setCandidates([]); setRangesReviewed(false); if (change.text !== undefined) setRules(rows => ({...rows, [id]: draftRule({...requirements.find(r => r.id === id)!, ...change})}));
   }
   async function assessCandidate() {
     if (!cv || !confirmed || busy) return;
-    setBusy('Reviewing the CV against your confirmed requirements…'); setError(null); setReport(null); setHighlight(null);
+    setBusy('Reviewing the CV against your confirmed requirements…'); setError(null); setReport(null); setResult(null); setHighlight(null);
     try {
-      const result = await assess({ cvText: cv.text, confirmed: true, requirements: requirements.map(({ id, text, mustHave }) => ({ id, text: text.trim(), mustHave })) });
+      const result = await assess({ cvText: cv.text, confirmed: true, requirements: requirements.map(row => ({...(rules[row.id] ?? draftRule(row)), ...row, text:row.text.trim(), assessmentMonth})).map(({id,text,mustHave,groups,interviewOnly,assessmentMonth}) => ({id,text,mustHave,groups,interviewOnly,assessmentMonth})) });
+      const complete = !result.evidence.some(row => row.verificationIssue);
+      setResult(complete ? result : null); setCandidates(rows => [...rows.filter(row => row.name !== cv.name), {name:cv.name,result:complete ? result : null,choice:'',note:'', ...(!complete ? {error:'Incomplete evidence; retry before recommending.'} : {})}]);
       setReport(result.evidence); setConfigured(true);
       requestAnimationFrame(() => evidenceRef.current?.focus());
     } catch (err) { setError({ area: 'cv', text: message(err) }); }
     finally { setBusy(null); }
   }
   const step = confirmed ? 3 : jd ? 2 : 1;
-  const rangeWarnings = jd ? experienceWarnings([jd.text]) : [];
+  const rangeWarnings = experienceWarnings(requirements.map(row => row.text));
   const failedRows = report?.filter(row => row.verificationIssue).length ?? 0;
-  const valid = requirements.length > 0 && requirements.length <= 40 && requirements.every(row => row.text.trim().length > 0 && row.text.length <= 1000);
+  const valid = requirements.length > 0 && requirements.length <= 40 && requirements.every(row => row.text.trim().length > 0 && row.text.length <= 1000 && ((rules[row.id] ?? draftRule(row)).interviewOnly || (rules[row.id] ?? draftRule(row)).groups.length > 0)) && /^\d{4}-\d{2}$/.test(assessmentMonth);
   const errorFor = (area: string) => error?.area === area ? <div className="error" role="alert">{error.text}</div> : null;
 
   return <>
-    <header className="topbar"><div className="brand">Candidate evidence</div><span>Milestone 1 · One role, one CV</span></header>
+    <header className="topbar"><div className="brand">Candidate evidence</div><span>Milestone 2 · One role, candidate recommendations</span></header>
     <main>
       <div className="intro"><h1>Read the evidence.<br />Choose whom to call.</h1><p>Start with the role, confirm what matters, then inspect the candidate’s own words.</p></div>
       <ol className="steps" aria-label="Review progress">
@@ -119,9 +127,11 @@ export default function App() {
           </section>
           {jd && <section ref={requirementsRef} tabIndex={-1} aria-labelledby="requirements-heading" className="panel requirements-panel">
             <div className="section-heading"><h2 id="requirements-heading">{confirmed ? 'Confirmed requirements' : 'Check the requirements'}</h2>{confirmed && <span className="state-label">Confirmed</span>}</div>
-            <p>{confirmed ? 'This candidate will be assessed against these requirements only.' : 'Correct anything the AI missed. Add specific requirements, remove irrelevant ones, and mark the must-haves.'}</p>
+            <p>{confirmed ? 'This candidate will be assessed against these requirements only.' : 'Check requirements, must-haves and CV evidence phrases. Separate required phrase groups with a semicolon; use / between equivalent phrases. All groups must be present for full evidence. These rules match documented claims, not skill quality.'}</p>
             {rangeWarnings.map(warning => <p className="evidence-note" key={warning}>{warning}</p>)}
             {!confirmed && rangeWarnings.length > 0 && <label className="checkbox"><input type="checkbox" checked={rangesReviewed} disabled={!!busy} onChange={event => setRangesReviewed(event.target.checked)} />I have reviewed the conflicting experience ranges.</label>}
+            {!confirmed && <label>Assessment month<input aria-label="Assessment month" type="month" value={assessmentMonth} onChange={event => setAssessmentMonth(event.target.value)} /></label>}
+            {rangeWarnings.length > 0 && <p>Remove or edit a conflicting range so one range applies. Acknowledgement alone cannot resolve it.</p>}
             {requirements.length === 0 && <p className="empty-hint">Extract from the JD above, or add requirements yourself.</p>}
             <div className="requirement-list">{requirements.map((row, index) => <div className="requirement" key={row.id}>
               <label className="requirement-label" htmlFor={`requirement-${row.id}`}>Requirement {index + 1}</label>
@@ -130,11 +140,13 @@ export default function App() {
                 {!confirmed && <button className="text-button" disabled={!!busy} aria-label={`Remove requirement ${index + 1}`} onClick={() => setRequirements(rows => rows.filter(item => item.id !== row.id))}>Remove</button>}
               </div>
               {row.sourceQuote ? <details className="source-quote"><summary>Supporting JD quote</summary><blockquote>{row.sourceQuote}</blockquote></details> : <small>Added or edited by you, or no exact JD quote verified. Check against the role.</small>}
+              <label>CV evidence phrases {index + 1}{confirmed ? <p>{ruleText(rules[row.id] ?? draftRule(row))}</p> : <input aria-label={`CV evidence phrases ${index + 1}`} value={ruleText(rules[row.id] ?? draftRule(row))} onChange={event => setRules(items => ({...items, [row.id]: {...(items[row.id] ?? draftRule(row)), groups:parseGroups(event.target.value)}}))} />}</label>
+              {!confirmed && <label className="checkbox"><input type="checkbox" checked={(rules[row.id] ?? draftRule(row)).interviewOnly} onChange={event => setRules(items => ({...items, [row.id]: {...(items[row.id] ?? draftRule(row)), interviewOnly:event.target.checked}}))} />Check in a call; exclude from CV coverage</label>}
               {row.reviewNote && <small>{row.reviewNote}</small>}
             </div>)}</div>
             {!confirmed && <button className="secondary" disabled={!!busy || requirements.length >= 40} onClick={() => setRequirements(rows => [...rows, { id: crypto.randomUUID(), text: '', mustHave: false, sourceQuote: null }])}>Add a requirement</button>}
             <div className="confirmation">
-              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setReport(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid || (rangeWarnings.length > 0 && !rangesReviewed)} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
+              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setReport(null); setResult(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid || (rangeWarnings.length > 0)} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
             </div>
           </section>}
         </div>
@@ -142,14 +154,15 @@ export default function App() {
           <section ref={cvRef} tabIndex={-1} aria-labelledby="cv-heading" className={`panel candidate-panel ${!confirmed ? 'waiting' : ''}`}>
             <div className="section-heading"><h2 id="cv-heading">The candidate</h2>{cv && <span className="state-label">Readable</span>}</div>
             {!confirmed ? <div className="empty-state"><h3>Confirm the role first</h3><p>Once the requirements are confirmed, add one CV and see the evidence for each requirement.</p></div> : <>
-              <p>Upload one CV. Evidence means a documented claim, not a verified skill or a hiring recommendation.</p>
+              <p>Add CVs one at a time. Each assessed candidate stays in the list below. Recommendations support your review; you make the decision.</p>
               <FilePicker label={cv ? 'Replace candidate CV' : 'Choose candidate CV'} disabled={!!busy} onFile={file => void upload(file, 'cv')} />
               {errorFor('cv')}
               {cv && <><div className="file-summary"><strong>{cv.name}</strong><span>{cv.text.length.toLocaleString()} characters read</span></div><DocumentText document={cv} highlight={highlight} /><button className="primary" disabled={!!busy} onClick={() => void assessCandidate()}>{report ? 'Assess this CV again' : 'Assess this CV'}</button></>}
             </>}
           </section>
+          {candidates.length > 0 && <section className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><p>App recommendation: <strong>{candidate.result.recommendation}</strong></p><p>{candidate.result.reason} Coverage: {candidate.result.coverage}%.</p>{candidate.result.missingMustHaves.map(text => <p key={text}>Missing must-have CV evidence: {text}</p>)}<label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label}>{label}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
-            <h2 id="evidence-heading">Evidence for this candidate</h2><p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
+            <h2 id="evidence-heading">Evidence for this candidate</h2>{result && <p><strong>{result.recommendation}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
             {failedRows > 0 && <p className="evidence-note" role="status">The assessment is incomplete: {failedRows} requirements could not be verified. Each affected row explains why. This does not establish that the candidate lacks those skills.</p>}
             {report.map(row => { const requirement = requirements.find(r => r.id === row.requirementId)!; return <article className="evidence-row" key={row.requirementId}>
@@ -162,7 +175,7 @@ export default function App() {
         </div>
       </div>
       <div className="activity" role="status" aria-live="polite">{busy && <><span className="busy-dot" />{busy} Please keep this page open.</>}</div>
-      <footer><p>Files stay in this browser session. Extracting requirements or assessing a CV sends its text through Convex to OpenAI. Refreshing clears this work.</p><p>Milestone 1 does not rank, shortlist, export, or save candidates.</p></footer>
+      <footer><p>Files stay in this browser session. Extracting JD requirements sends JD text through Convex to OpenAI. CV recommendations use fixed rules in Convex without an AI call. Refreshing clears this work.</p><p>Recommendations and recruiter notes are available in this session. Saving and export come later.</p></footer>
     </main>
   </>;
 }

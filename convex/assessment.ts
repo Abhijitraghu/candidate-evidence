@@ -9,6 +9,8 @@ import { components, internal } from "./_generated/api";
 import { verifyEvidence } from "../shared/evidence";
 import { applyEvidencePolicy, buildPassages, completeRequirements, extractJDSources, selectedEvidence } from "../shared/assessment";
 
+import { recommend } from "../shared/recommendation";
+
 const MODEL = "gpt-4.1-mini";
 const requirement = v.object({ id: v.string(), text: v.string(), mustHave: v.boolean() });
 const status = v.union(v.literal("found"), v.literal("partial"), v.literal("conflicting"), v.literal("not_found"), v.literal("needs_checking"));
@@ -122,5 +124,16 @@ export const assessCandidate = action({
       return { evidence: applyEvidencePolicy(requirements, verified), model: MODEL,
         diagnostics: { cvCharacters: cvText.length, initialFailures, retried: initialFailures.length > 0, retryFailures } };
     } catch (error) { return readableAIError(error); }
+  },
+});
+
+// Milestone 2 uses confirmed fixed rules, with no AI call or document persistence.
+export const recommendCandidate = action({
+  args: { cvText: v.string(), confirmed: v.literal(true), requirements: v.array(v.object({ id: v.string(), text: v.string(), mustHave: v.boolean(), groups: v.array(v.array(v.string())), interviewOnly: v.boolean(), assessmentMonth: v.optional(v.string()) })) },
+  returns: v.object({ evidence: v.array(evidence), recommendation: v.union(v.literal('Move to next round'), v.literal('Maybe'), v.literal('Not now')), coverage: v.number(), missingMustHaves: v.array(v.string()), reason: v.string(), ruleVersion: v.string() }),
+  handler: async (_, {cvText, requirements}) => {
+    validateText(cvText);
+    if (!requirements.length || requirements.length > 40 || requirements.some(r => r.text.length > 1000 || r.groups.length > 50 || r.groups.some(g => g.length > 30 || g.some(t => !t.trim() || t.length > 200)))) throw new ConvexError('Review between 1 and 40 bounded evidence rules.');
+    try { return recommend(requirements, cvText); } catch (error) { throw new ConvexError(error instanceof Error ? error.message : 'Review the evidence rules.'); }
   },
 });

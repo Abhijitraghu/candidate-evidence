@@ -21,11 +21,12 @@ test('recruiter confirms a JD before inspecting exact evidence for one CV', asyn
     page.getByLabel('Requirement 1', { exact: true }).waitFor({ state: 'visible', timeout: 120000 }).then(async () => { await expect(page.locator('.activity')).toBeHidden({ timeout: 120000 }); }),
     page.getByRole('alert').waitFor({ state: 'visible', timeout: 120000 }).then(async () => { throw new Error(await page.getByRole('alert').innerText()); }),
   ]);
-  if (await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).count()) {
-    await page.getByRole('checkbox', { name: 'I have reviewed the conflicting experience ranges.' }).check();
+  // Resolve the JD's conflicting ranges by keeping its wider 1–7-year range.
+  for (const textarea of await page.locator('.requirement textarea').all()) {
+    if (/1\s*[-–]\s*3\s*years/.test(await textarea.inputValue())) await textarea.fill('1-7 years of relevant experience');
   }
   await expect(page.getByRole('button', { name: 'Confirm requirements', exact: true })).toBeEnabled();
-  const requirements = page.locator('textarea');
+  const requirements = page.locator('.requirement textarea');
   expect(await requirements.count()).toBeGreaterThan(0);
   const originalText = await requirements.first().inputValue();
   await requirements.first().fill('');
@@ -46,7 +47,7 @@ test('recruiter confirms a JD before inspecting exact evidence for one CV', asyn
     page.getByRole('heading', { name: 'Evidence for this candidate', exact: true }).waitFor({ state: 'visible', timeout: 120000 }),
     page.getByRole('alert').waitFor({ state: 'visible', timeout: 120000 }).then(async () => { throw new Error(await page.getByRole('alert').innerText()); }),
   ]);
-  const rows = page.locator('.evidence-row');
+  const rows = page.locator('.evidence-panel .evidence-row');
   expect(await rows.count()).toBe(editedRequirement);
   const cvText = await page.locator('.candidate-panel pre').textContent();
   const quotes = await page.locator('.cv-quote blockquote').allTextContents();
