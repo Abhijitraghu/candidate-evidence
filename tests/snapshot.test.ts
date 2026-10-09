@@ -33,3 +33,15 @@ test('summary-only, long, duplicate and ambiguous quotes never become top streng
   assert.equal(snapshotContent(recommend([rules.sql],cv),[requirement],rules,cv).strengths.length,0);
  }
 });
+
+test('verdict names evidence gaps without changing the assessment', async () => {
+ const {verdict} = await import('../src/lib/verdict.ts');
+ const requirements = [{id:'sql',text:'SQL',mustHave:true,sourceQuote:null},{id:'python',text:'Python',mustHave:false,sourceQuote:null}];
+ const rules = requirements.map(draftRule);
+ for (const [cv,expected] of [['SQL Python','I recommend this candidate'],['Learning SQL','Recommend only if the call confirms: SQL'],['Python','I do not recommend this candidate: missing SQL'],['SQL\nLearning Python','Recommend only if the call confirms: Python']]) {
+  const result = recommend(rules,`Candidate CV with professional experience.\n${cv}`);
+  const before = JSON.stringify(result);
+  assert.equal(verdict(result,requirements),expected);
+  assert.equal(JSON.stringify(result),before);
+ }
+});

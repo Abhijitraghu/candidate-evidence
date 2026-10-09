@@ -73,7 +73,7 @@ test('a fresh JD gets its own rules and matching and unrelated CVs repeat identi
   await expect(page.getByRole('heading',{name:'Evidence for this candidate',exact:true})).toBeVisible();
   await page.getByText('View full evidence', {exact:true}).click();
   const first = await page.locator('.evidence-panel').innerText();
-  expect(first).toContain(index === 0 ? 'Move to next round' : 'Not now');
+  expect(first).toContain(index === 0 ? 'I recommend this candidate' : 'I do not recommend this candidate');
   const lastCandidate = page.getByRole('region',{name:'Candidate recommendations'}).getByRole('article').last();
   for (const heading of ['Recommendation','Top strengths','Gaps','Check on call']) await expect(lastCandidate.getByRole('heading',{name:heading,exact:true})).toBeVisible();
   const cv = await page.locator('.candidate-panel pre').textContent();

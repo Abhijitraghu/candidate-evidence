@@ -96,7 +96,7 @@ test('review screen handles errors, evidence, highlights and requirement edits u
   await page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'}).fill('Call to clarify Python');
   const recommendation = page.getByRole('region', {name:'Candidate recommendations'});
   for (const name of ['Recommendation','Top strengths','Gaps','Check on call']) await expect(recommendation.getByRole('heading',{name,exact:true})).toBeVisible();
-  await expect(recommendation.locator('.candidate-snapshot')).toContainText('Maybe');
+  await expect(recommendation.locator('.candidate-snapshot')).toContainText('Recommend only if the call confirms:');
   await expect(recommendation.locator('.candidate-snapshot')).toContainText('Built monthly reports with SQL at Example Company.');
   await expect(recommendation.locator('.candidate-snapshot')).toContainText('No CV evidence.');
   await expect(page.getByRole('textbox', {name:'Recruiter note for synthetic-cv.docx'})).toHaveValue('Call to clarify Python');
