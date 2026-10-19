@@ -109,6 +109,7 @@ try{
  // A new context is Chrome's private window: no cookies or local storage shared.
  const privateContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const privatePage=await privateContext.newPage();
+ await privatePage.clock.install();
  await privatePage.goto(shareLink);
  const sharedTable=privatePage.locator('.ranked-table');
  await expect(sharedTable.locator('tbody tr')).toHaveCount(2);
@@ -132,7 +133,6 @@ try{
  await expect(privatePage.getByRole('heading',{name:'Link expired or not found',exact:true})).toBeVisible();
  await privatePage.goto(shareLink);
  await expect(privatePage.locator('.ranked-table tbody tr')).toHaveCount(2);
- await privatePage.clock.install();
  await privatePage.clock.fastForward(14*24*60*60*1000+1000);
  await expect(privatePage.getByRole('heading',{name:'Link expired or not found',exact:true})).toBeVisible();
  await privateContext.close();
