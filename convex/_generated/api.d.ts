@@ -10,6 +10,7 @@
 
 import type * as assessment from "../assessment.js";
 import type * as budget from "../budget.js";
+import type * as shares from "../shares.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   assessment: typeof assessment;
   budget: typeof budget;
+  shares: typeof shares;
 }>;
 
 /**

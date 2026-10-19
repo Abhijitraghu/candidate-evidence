@@ -1,3 +1,4 @@
+import { SendShortlist, rankShared } from './ShareShortlist';
 import { CandidateComparison } from './CandidateComparison';
 import { verdict, verdictRank } from './lib/verdict';
 import { snapshotContent } from './lib/snapshot';
@@ -51,6 +52,7 @@ export default function App() {
   const [assessmentMonth, setAssessmentMonth] = useState(new Date().toISOString().slice(0,7));
   const [candidates, setCandidates] = useState<{name: string; result: CandidateResult | null; choice: Recommendation | ''; note: string; date?: string; cvText?: string; error?: string}[]>([]);
   const [selected, setSelected] = useState('');
+  const [shareChoices, setShareChoices] = useState<Record<string,boolean>>({});
   const [checked, setChecked] = useState<string[]>([]);
   const [comparing, setComparing] = useState(false);
   const [search, setSearch] = useState('');
@@ -76,7 +78,7 @@ export default function App() {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
     setReport(null); setResult(null); setHighlight(null);
-    if (area === 'jd') { setJDInput(''); setCandidates([]); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
+    if (area === 'jd') { setJDInput(''); setCandidates([]); setShareChoices({}); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
     else setCV(null);
     try {
       const document = await readDocument(file);
@@ -92,7 +94,7 @@ export default function App() {
     }
     setJD({name: 'Pasted job description', text: jdInput, pages: null});
     setRequirements([]); setRules({}); setConfirmed(false); setRangesReviewed(false);
-    setCV(null); setCandidates([]); setReport(null); setResult(null); setHighlight(null);
+    setCV(null); setCandidates([]); setShareChoices({}); setReport(null); setResult(null); setHighlight(null);
   }
   async function extractRequirements() {
     if (!jd || busy) return;
@@ -106,7 +108,7 @@ export default function App() {
   }
   function editRequirement(id: string, change: Partial<DraftRequirement>) {
     setRequirements(rows => rows.map(row => row.id === id ? { ...row, ...change } : row));
-    setReport(null); setResult(null); setCandidates([]); setRangesReviewed(false); if (change.text !== undefined) setRules(rows => ({...rows, [id]: draftRule({...requirements.find(r => r.id === id)!, ...change})}));
+    setReport(null); setResult(null); setCandidates([]); setShareChoices({}); setRangesReviewed(false); if (change.text !== undefined) setRules(rows => ({...rows, [id]: draftRule({...requirements.find(r => r.id === id)!, ...change})}));
   }
   async function assessCandidate() {
     if (!cv || !confirmed || busy) return;
@@ -132,10 +134,11 @@ export default function App() {
     <main>
       {candidates.length > 0 && <section className="panel ranked-panel" aria-label="Ranked candidates" ref={rankingRef} tabIndex={-1}>
         <h1>Ranked candidates</h1><div className="ranked-controls"><label>Search by name<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label><button className="primary" disabled={candidates.filter(c => checked.includes(c.name) && c.result).length < 2} onClick={() => setComparing(true)}>Compare</button></div>
-        <div className="table-scroll"><table className="ranked-table"><thead><tr><th>Select</th><th>Name</th><th>Verdict</th><th>Coverage %</th><th>Must-haves met</th></tr></thead><tbody>{[...candidates].sort((a,b) => verdictRank(b.result)-verdictRank(a.result) || (b.result?.coverage ?? -1)-(a.result?.coverage ?? -1) || a.name.localeCompare(b.name)).filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
+        <div className="table-scroll"><table className="ranked-table"><thead><tr><th>Select</th><th>Share</th><th>Name</th><th>Verdict</th><th>Coverage %</th><th>Must-haves met</th></tr></thead><tbody>{[...candidates].sort((a,b) => verdictRank(b.result)-verdictRank(a.result) || (b.result?.coverage ?? -1)-(a.result?.coverage ?? -1) || a.name.localeCompare(b.name)).filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
           const must = c.result ? snapshotContent(c.result,requirements,rules,c.cvText ?? '').must : [];
-          return <tr key={c.name} onClick={() => {setSelected(c.name); setComparing(false); requestAnimationFrame(() => document.getElementById('selected-candidate')?.scrollIntoView({block:'start'}));}}><td><input type="checkbox" aria-label={`Compare ${c.name}`} disabled={!c.result} checked={checked.includes(c.name)} onClick={e => e.stopPropagation()} onChange={e => setChecked(rows => e.target.checked ? [...rows,c.name] : rows.filter(n => n !== c.name))} /></td><td><button className="text-button" onClick={() => setSelected(c.name)}>{c.name.replace(/\.(docx|pdf)$/i,'').trim()}</button></td><td>{c.result ? verdict(c.result,requirements) : `Unable to assess: ${c.error}`}</td><td>{c.result ? `${c.result.coverage}%` : '—'}</td><td>{c.result ? `${must.filter(r => r.evidence.status === 'found').length} of ${must.length}` : '—'}</td></tr>;
+          return <tr key={c.name} onClick={() => {setSelected(c.name); setComparing(false); requestAnimationFrame(() => document.getElementById('selected-candidate')?.scrollIntoView({block:'start'}));}}><td><input type="checkbox" aria-label={`Compare ${c.name}`} disabled={!c.result} checked={checked.includes(c.name)} onClick={e => e.stopPropagation()} onChange={e => setChecked(rows => e.target.checked ? [...rows,c.name] : rows.filter(n => n !== c.name))} /></td><td><input type="checkbox" aria-label={`Share ${c.name}`} disabled={!c.result} checked={!!c.result && (shareChoices[c.name] ?? c.result.recommendation === 'Move to next round')} onClick={e => e.stopPropagation()} onChange={e=>setShareChoices(rows=>({...rows,[c.name]:e.target.checked}))} /></td><td><button className="text-button" onClick={() => setSelected(c.name)}>{c.name.replace(/\.(docx|pdf)$/i,'').trim()}</button></td><td>{c.result ? verdict(c.result,requirements) : `Unable to assess: ${c.error}`}</td><td>{c.result ? `${c.result.coverage}%` : '—'}</td><td>{c.result ? `${must.filter(r => r.evidence.status === 'found').length} of ${must.length}` : '—'}</td></tr>;
         })}</tbody></table></div>{!candidates.some(c => c.name.toLowerCase().includes(search.toLowerCase())) && <p>No candidates match this name.</p>}
+        <SendShortlist payload={{role:jd?.text.split(/\r?\n/).find(line=>line.trim())?.replace(/^Job Title:\s*/i,'').trim() ?? jd?.name ?? 'Confirmed role', requirements, rules, candidates:candidates.filter(c=>c.result && (shareChoices[c.name] ?? c.result.recommendation === 'Move to next round')).map(c=>({name:c.name,result:c.result!,date:c.date ?? assessmentMonth,cvText:c.cvText ?? ''})).sort(rankShared)}} />
         {comparing && <CandidateComparison candidates={[...candidates].filter(c => checked.includes(c.name) && c.result).sort((a,b)=>verdictRank(b.result)-verdictRank(a.result) || b.result!.coverage-a.result!.coverage)} requirements={requirements} rules={rules} />}
       </section>}
       <div className="intro"><h1>Read the evidence.<br />Choose whom to call.</h1><p>Start with the role, confirm what matters, then inspect the candidate’s own words.</p></div>
@@ -177,7 +180,7 @@ export default function App() {
             </div>)}</div>
             {!confirmed && <button className="secondary" disabled={!!busy || requirements.length >= 40} onClick={() => setRequirements(rows => [...rows, { id: crypto.randomUUID(), text: '', mustHave: false, sourceQuote: null }])}>Add a requirement</button>}
             <div className="confirmation">
-              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setCandidates([]); setChecked([]); setComparing(false); setReport(null); setResult(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid || (rangeWarnings.length > 0)} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
+              {confirmed ? <button className="secondary" disabled={!!busy} onClick={() => { setConfirmed(false); setCandidates([]); setShareChoices({}); setChecked([]); setComparing(false); setReport(null); setResult(null); setHighlight(null); }}>Edit requirements</button> : <><p>By confirming, you’ve checked that these requirements describe the role.</p><button className="primary" disabled={!!busy || !valid || (rangeWarnings.length > 0)} onClick={() => { setConfirmed(true); setReport(null); setError(null); requestAnimationFrame(() => cvRef.current?.focus()); }}>Confirm requirements</button></>}
             </div>
           </section>}
         </div>

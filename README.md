@@ -103,3 +103,11 @@ The production Convex environment needs `OPENAI_API_KEY` for JD extraction. Keep
 - Production release deployed with `npm run deploy` on 5 October 2026.
 - Before publishing, all Git history was checked: no test-cvs, environment files, private reports, PDF/Word CVs or recognizable API keys were found.
 - Verification: 25 unit checks, 4 development browser flows and build passed; the real JD upload → extraction → confirmation → CV assessment → exact quote/highlight flow also passed against the live production URL. Desktop and phone layouts checked. The live bundle connects to the production backend.
+
+## Send to hiring manager
+
+The ranked table has separate Share ticks (recommended candidates start ticked). Enter the manager’s email and choose **Send to hiring manager**. This saves an immutable copy of exactly the selected candidates in Convex, then opens a `mailto:` draft in the recruiter’s email app. The recruiter reviews and sends it; this app has no email-sending service.
+
+Each share uses a random 64-character token and expires after 14 days. Only the token lookup is public; there is no public list of shares. The read-only page includes the selected ranked rows, their existing snapshots and PDF downloads, with no sign-in. The server refuses expired links, the page removes expired content, and Convex schedules deletion of the saved copy after 14 days. Unlike the assessment flow, explicit sharing persists selected CV text and evidence for that period. Unselected CVs and recruiter notes are never included. Matching, verdict and coverage code is unchanged.
+
+Run `node --experimental-strip-types scripts/check-sharing.mjs` with the local app on port 5175, or set `LIVE_URL=https://opulent-alligator-318.convex.site` to verify production. This uses the eight private test CVs and existing `.local-checks/rule-results.json` baseline; it checks original results, defaults, exact email body, two-candidate isolation in a fresh private browser context, PDF download, invalid links and expiry. No email is sent.
