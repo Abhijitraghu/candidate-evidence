@@ -3,7 +3,9 @@ import { CandidateComparison } from './CandidateComparison';
 import { verdict, verdictRank } from './lib/verdict';
 import { snapshotContent } from './lib/snapshot';
 import { CandidateSnapshot } from "./CandidateSnapshot";
-import { useAction } from "convex/react";
+import { Pipeline, type Opening } from "./Pipeline";
+import { stages, type Stage } from "../shared/pipeline";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { ConvexError } from "convex/values";
 import { api } from "../convex/_generated/api";
@@ -40,6 +42,15 @@ function DocumentText({ document, highlight, expanded }: { document: ReadDocumen
 }
 
 export default function App() {
+  const [workspace] = useState(() => {const old=localStorage.getItem('hiring-workspace'); if(old)return old; const key=crypto.randomUUID();localStorage.setItem('hiring-workspace',key);return key;});
+  const [openingKey,setOpeningKey]=useState<string>(()=>crypto.randomUUID());
+  const [page,setPage]=useState<'shortlist'|'pipeline'>('shortlist');
+  const [historyKey,setHistoryKey]=useState<string|null>(null);
+  const openings=useQuery(api.pipeline.list,{workspace});
+  const saveOpening=useMutation(api.pipeline.save);
+  const changeStage=useMutation(api.pipeline.changeStage);
+  const [saveState,setSaveState]=useState('');
+  const [stageBusy,setStageBusy]=useState<string|null>(null);
   const extract = useAction(api.assessment.extractRequirements);
   const assess = useAction(api.assessment.recommendCandidate);
   const setup = useAction(api.assessment.setup);
@@ -74,11 +85,24 @@ export default function App() {
     return () => { active = false; };
   }, [setup]);
 
+  const openingName=jd?.text.split(/\r?\n/).find(line=>line.trim())?.replace(/^Job Title:\s*/i,'').trim() || jd?.name || 'Confirmed role';
+  useEffect(()=>{
+    if(!confirmed || !jd || !candidates.length)return;
+    let active=true;
+    setSaveState('Saving opening…');
+    const timer=setTimeout(()=>{saveOpening({workspace,key:openingKey,name:openingName,payload:JSON.stringify({jd,requirements,rules,assessmentMonth,candidates}),names:candidates.map(c=>c.name)}).then(()=>{if(active)setSaveState('Opening saved');}).catch(err=>{if(active)setSaveState('Save failed: '+message(err));});},250);
+    return ()=>{active=false;clearTimeout(timer);};
+  },[candidates,confirmed,jd,requirements,rules,assessmentMonth,workspace,openingKey,openingName,saveOpening]);
+  function openSaved(opening:Opening){
+    const saved=JSON.parse(opening.payload);
+    setOpeningKey(opening.key);setJD(saved.jd);setRequirements(saved.requirements);setRules(saved.rules);setAssessmentMonth(saved.assessmentMonth);setCandidates(saved.candidates);setConfirmed(true);setSelected(saved.candidates[0]?.name??'');setCV(null);setReport(null);setResult(null);setShareChoices({});setChecked([]);setComparing(false);setSearch('');setPage('shortlist');
+  }
+  async function moveStage(name:string,stage:Stage){setStageBusy(name);try{await changeStage({workspace,key:openingKey,name,stage});setSaveState('Stage saved');}catch(err){setSaveState('Stage change failed: '+message(err));}finally{setStageBusy(null);}}
   async function upload(file: File, area: 'jd' | 'cv') {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
     setReport(null); setResult(null); setHighlight(null);
-    if (area === 'jd') { setJDInput(''); setCandidates([]); setShareChoices({}); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
+    if (area === 'jd') { setOpeningKey(crypto.randomUUID()); setJDInput(''); setCandidates([]); setShareChoices({}); setRules({}); setJD(null); setRequirements([]); setConfirmed(false); setRangesReviewed(false); setCV(null); }
     else setCV(null);
     try {
       const document = await readDocument(file);
@@ -92,6 +116,7 @@ export default function App() {
       setError({area: 'jd', text: 'Paste between 30 and 80,000 characters of job description text.'});
       return;
     }
+    setOpeningKey(crypto.randomUUID());
     setJD({name: 'Pasted job description', text: jdInput, pages: null});
     setRequirements([]); setRules({}); setConfirmed(false); setRangesReviewed(false);
     setCV(null); setCandidates([]); setShareChoices({}); setReport(null); setResult(null); setHighlight(null);
@@ -132,11 +157,14 @@ export default function App() {
   return <>
     <header className="topbar"><div className="brand">Candidate evidence</div><span>Milestone 2 · One role, candidate recommendations</span></header>
     <main>
+      <nav className="pipeline-nav" aria-label="Main navigation"><button className="secondary" aria-current={page==='shortlist'?'page':undefined} onClick={()=>setPage('shortlist')}>Shortlist</button><button className="secondary" aria-current={page==='pipeline'?'page':undefined} onClick={()=>setPage('pipeline')}>Pipeline</button><span role="status">{saveState}</span></nav>
+      {page==='pipeline'?<Pipeline openings={openings} selected={historyKey} onSelect={setHistoryKey} onOpen={openSaved}/>:<>
+
       {candidates.length > 0 && <section className="panel ranked-panel" aria-label="Ranked candidates" ref={rankingRef} tabIndex={-1}>
-        <h1>Ranked candidates</h1><div className="ranked-controls"><label>Search by name<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label><button className="primary" disabled={candidates.filter(c => checked.includes(c.name) && c.result).length < 2} onClick={() => setComparing(true)}>Compare</button></div>
-        <div className="table-scroll"><table className="ranked-table"><thead><tr><th>Select</th><th>Share</th><th>Name</th><th>Verdict</th><th>Coverage %</th><th>Must-haves met</th></tr></thead><tbody>{[...candidates].sort((a,b) => verdictRank(b.result)-verdictRank(a.result) || (b.result?.coverage ?? -1)-(a.result?.coverage ?? -1) || a.name.localeCompare(b.name)).filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
+        <h1>Ranked candidates</h1><h2>{openingName}</h2><div className="ranked-controls"><label>Search by name<input type="search" value={search} onChange={e => setSearch(e.target.value)} /></label><button className="primary" disabled={candidates.filter(c => checked.includes(c.name) && c.result).length < 2} onClick={() => setComparing(true)}>Compare</button></div>
+        <div className="table-scroll"><table className="ranked-table"><thead><tr><th>Select</th><th>Share</th><th>Name</th><th>Verdict</th><th>Coverage %</th><th>Must-haves met</th><th>Stage</th></tr></thead><tbody>{[...candidates].sort((a,b) => verdictRank(b.result)-verdictRank(a.result) || (b.result?.coverage ?? -1)-(a.result?.coverage ?? -1) || a.name.localeCompare(b.name)).filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
           const must = c.result ? snapshotContent(c.result,requirements,rules,c.cvText ?? '').must : [];
-          return <tr key={c.name} onClick={() => {setSelected(c.name); setComparing(false); requestAnimationFrame(() => document.getElementById('selected-candidate')?.scrollIntoView({block:'start'}));}}><td><input type="checkbox" aria-label={`Compare ${c.name}`} disabled={!c.result} checked={checked.includes(c.name)} onClick={e => e.stopPropagation()} onChange={e => setChecked(rows => e.target.checked ? [...rows,c.name] : rows.filter(n => n !== c.name))} /></td><td><input type="checkbox" aria-label={`Share ${c.name}`} disabled={!c.result} checked={!!c.result && (shareChoices[c.name] ?? c.result.recommendation === 'Move to next round')} onClick={e => e.stopPropagation()} onChange={e=>setShareChoices(rows=>({...rows,[c.name]:e.target.checked}))} /></td><td><button className="text-button" onClick={() => setSelected(c.name)}>{c.name.replace(/\.(docx|pdf)$/i,'').trim()}</button></td><td>{c.result ? verdict(c.result,requirements) : `Unable to assess: ${c.error}`}</td><td>{c.result ? `${c.result.coverage}%` : '—'}</td><td>{c.result ? `${must.filter(r => r.evidence.status === 'found').length} of ${must.length}` : '—'}</td></tr>;
+          return <tr key={c.name} onClick={() => {setSelected(c.name); setComparing(false); requestAnimationFrame(() => document.getElementById('selected-candidate')?.scrollIntoView({block:'start'}));}}><td><input type="checkbox" aria-label={`Compare ${c.name}`} disabled={!c.result} checked={checked.includes(c.name)} onClick={e => e.stopPropagation()} onChange={e => setChecked(rows => e.target.checked ? [...rows,c.name] : rows.filter(n => n !== c.name))} /></td><td><input type="checkbox" aria-label={`Share ${c.name}`} disabled={!c.result} checked={!!c.result && (shareChoices[c.name] ?? c.result.recommendation === 'Move to next round')} onClick={e => e.stopPropagation()} onChange={e=>setShareChoices(rows=>({...rows,[c.name]:e.target.checked}))} /></td><td><button className="text-button" onClick={() => setSelected(c.name)}>{c.name.replace(/\.(docx|pdf)$/i,'').trim()}</button></td><td>{c.result ? verdict(c.result,requirements) : `Unable to assess: ${c.error}`}</td><td>{c.result ? `${c.result.coverage}%` : '—'}</td><td>{c.result ? `${must.filter(r => r.evidence.status === 'found').length} of ${must.length}` : '—'}</td><td><select aria-label={`Stage for ${c.name}`} value={openings?.find(o=>o.key===openingKey)?.candidates.find(row=>row.name===c.name)?.stage??'Applied'} disabled={stageBusy===c.name || !openings?.find(o=>o.key===openingKey)?.candidates.some(row=>row.name===c.name)} onClick={e=>e.stopPropagation()} onChange={e=>void moveStage(c.name,e.target.value as Stage)}>{stages.map(stage=><option key={stage}>{stage}</option>)}</select></td></tr>;
         })}</tbody></table></div>{!candidates.some(c => c.name.toLowerCase().includes(search.toLowerCase())) && <p>No candidates match this name.</p>}
         <SendShortlist payload={{role:jd?.text.split(/\r?\n/).find(line=>line.trim())?.replace(/^Job Title:\s*/i,'').trim() ?? jd?.name ?? 'Confirmed role', requirements, rules, candidates:candidates.filter(c=>c.result && (shareChoices[c.name] ?? c.result.recommendation === 'Move to next round')).map(c=>({name:c.name,result:c.result!,date:c.date ?? assessmentMonth,cvText:c.cvText ?? ''})).sort(rankShared)}} />
         {comparing && <CandidateComparison candidates={[...candidates].filter(c => checked.includes(c.name) && c.result).sort((a,b)=>verdictRank(b.result)-verdictRank(a.result) || b.result!.coverage-a.result!.coverage)} requirements={requirements} rules={rules} />}
@@ -194,7 +222,7 @@ export default function App() {
               {cv && <><div className="file-summary"><strong>{cv.name}</strong><span>{cv.text.length.toLocaleString()} characters read</span></div><DocumentText document={cv} highlight={highlight} /><button className="primary" disabled={!!busy} onClick={() => void assessCandidate()}>{report ? 'Assess this CV again' : 'Assess this CV'}</button></>}
             </>}
           </section>
-          {candidates.length > 0 && <section id="selected-candidate" className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p hidden>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes stay in this session. Changing the role clears them for a fresh review.</p>{candidates.map((candidate,index) => candidate.name === selected && <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><CandidateSnapshot name={candidate.name.replace(/\.(docx|pdf)$/i, '').trim()} role={jd?.text.split(/\r?\n/).find(line => line.trim())?.replace(/^Job Title:\s*/i, '') ?? jd?.name ?? 'Confirmed role'} date={candidate.date ?? assessmentMonth} result={candidate.result} requirements={requirements} rules={rules} cvText={candidate.cvText ?? ''} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label} value={label}>{verdict({...candidate.result!,recommendation:label},requirements)}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
+          {candidates.length > 0 && <section id="selected-candidate" className="panel" aria-label="Candidate recommendations"><h2>Candidate recommendations</h2><p hidden>{labels.map(label => `${label}: ${candidates.filter(c => (c.choice || c.result?.recommendation) === label).length}`).join(' · ')}</p><p>Choices and notes are saved with this opening. Use Pipeline to reopen a saved shortlist.</p>{candidates.map((candidate,index) => candidate.name === selected && <article key={`${candidate.name}-${index}`} className="evidence-row"><h3>{candidate.name}</h3>{candidate.result ? <><CandidateSnapshot name={candidate.name.replace(/\.(docx|pdf)$/i, '').trim()} role={jd?.text.split(/\r?\n/).find(line => line.trim())?.replace(/^Job Title:\s*/i, '') ?? jd?.name ?? 'Confirmed role'} date={candidate.date ?? assessmentMonth} result={candidate.result} requirements={requirements} rules={rules} cvText={candidate.cvText ?? ''} /><label>Recruiter recommendation<select aria-label={`Recruiter recommendation for ${candidate.name}`} value={candidate.choice || candidate.result.recommendation} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,choice:event.target.value as Recommendation} : c))}>{labels.map(label => <option key={label} value={label}>{verdict({...candidate.result!,recommendation:label},requirements)}</option>)}</select></label><label>Recruiter note<textarea aria-label={`Recruiter note for ${candidate.name}`} value={candidate.note} onChange={event => setCandidates(rows => rows.map((c,i) => i === index ? {...c,note:event.target.value} : c))} /></label><details><summary>Reasons and exact CV quotes</summary>{candidate.result.evidence.map(row => <div key={row.requirementId}><h4>{requirements.find(r => r.id === row.requirementId)?.text}</h4><p>{statusLabels[row.status]}</p>{row.quotes.map((q,i) => <blockquote key={i}>{q.text}</blockquote>)}<p>{row.explanation}</p></div>)}</details></> : <p>Unable to assess: {candidate.error}</p>}</article>)}</section>}
           {report && cv && <section ref={evidenceRef} tabIndex={-1} aria-labelledby="evidence-heading" className="panel evidence-panel">
             <h2 id="evidence-heading">Evidence for this candidate</h2><details><summary>View full evidence</summary>{result && <p><strong>{verdict(result,requirements)}</strong> · {result.reason}</p>}<p className="evidence-note">Every displayed quote matches the extracted CV text exactly. The interpretation still needs your review. Communication and culture fit need a recruiter call.</p>
             <p className="report-summary">{failedRows === report.length ? 'No verified assessment is available. Retry the assessment; you can still read the CV.' : `${report.filter(row => row.status === 'found').length} of ${requirements.length} requirements have supporting evidence. This is not a match score.`}</p>
@@ -209,7 +237,7 @@ export default function App() {
         </div>
       </div>
       <div className="activity" role="status" aria-live="polite">{busy && <><span className="busy-dot" />{busy} Please keep this page open.</>}</div>
-      <footer><p>Files stay in this browser session. Extracting JD requirements sends JD text through Convex to OpenAI. CV recommendations use fixed rules in Convex without an AI call. Refreshing clears this work.</p><p>Recommendations and recruiter notes are available in this session. Download a one-page candidate snapshot for the hiring manager. Saving comes later.</p></footer>
+      </>}<footer><p>Screened openings, candidates and stage history are saved in Convex and reopened through Pipeline on this browser. Keep this browser’s site data to retain access. Unscreened files stay in this session. Extracting JD requirements sends JD text through Convex to OpenAI. CV recommendations use fixed rules in Convex without an AI call. </p><p>Screened recommendations and recruiter notes are saved with each opening. Download a one-page candidate snapshot for the hiring manager.</p></footer>
     </main>
   </>;
 }
