@@ -51,6 +51,9 @@ export default function App() {
   const changeStage=useMutation(api.pipeline.changeStage);
   const [saveState,setSaveState]=useState('');
   const [stageBusy,setStageBusy]=useState<string|null>(null);
+  const generateJD = useAction(api.jd.generate);
+  const [jdPoints, setJDPoints] = useState('');
+  const jdInputRef = useRef<HTMLTextAreaElement>(null);
   const extract = useAction(api.assessment.extractRequirements);
   const assess = useAction(api.assessment.recommendCandidate);
   const setup = useAction(api.assessment.setup);
@@ -98,6 +101,17 @@ export default function App() {
     setOpeningKey(opening.key);setJD(saved.jd);setRequirements(saved.requirements);setRules(saved.rules);setAssessmentMonth(saved.assessmentMonth);setCandidates(saved.candidates);setConfirmed(true);setSelected(saved.candidates[0]?.name??'');setCV(null);setReport(null);setResult(null);setShareChoices({});setChecked([]);setComparing(false);setSearch('');setPage('shortlist');
   }
   async function moveStage(name:string,stage:Stage){setStageBusy(name);try{await changeStage({workspace,key:openingKey,name,stage});setSaveState('Stage saved');}catch(err){setSaveState('Stage change failed: '+message(err));}finally{setStageBusy(null);}}
+  async function generateJobDescription() {
+    if (busy || jdPoints.trim().length < 10) return;
+    setBusy('Generating the job description…'); setError(null);
+    try {
+      const draft = await generateJD({points: jdPoints});
+      setJDInput(draft);
+      requestAnimationFrame(() => jdInputRef.current?.focus());
+    } catch {
+      setError({area: 'generate', text: 'Could not generate, try again'});
+    } finally { setBusy(null); }
+  }
   async function upload(file: File, area: 'jd' | 'cv') {
     setBusy(area === 'jd' ? 'Reading the job description…' : 'Reading the CV…'); setError(null);
     // Clear the previous result immediately, so a failed replacement can never show stale evidence.
@@ -180,7 +194,13 @@ export default function App() {
             <div className="section-heading"><h2 id="jd-heading">The job description</h2>{jd && <span className="state-label">Readable</span>}</div>
             <p>Upload or paste the JD you’re hiring against. You’ll check its requirements before the CV is assessed.</p>
             <FilePicker label={jd ? 'Replace job description' : 'Choose job description'} disabled={!!busy} onFile={file => void upload(file, 'jd')} />
-            <label className="paste-jd">Paste job description<textarea aria-label="Paste job description" value={jdInput} disabled={!!busy} rows={6} placeholder="Paste the full job description here" onChange={event => setJDInput(event.target.value)} /></label>
+            {!confirmed && <div className="jd-generator">
+              <label htmlFor="jd-points">What are you looking for?</label><textarea id="jd-points" value={jdPoints} disabled={!!busy} maxLength={4000} rows={4} placeholder="Role, experience, must-have skills, location. Add any nice-to-have skills too." onChange={event => setJDPoints(event.target.value)} />
+              <p>Generate a draft below, edit it, then choose “Use pasted JD”.</p>
+              <button className="secondary" disabled={!!busy || jdPoints.trim().length < 10} onClick={() => void generateJobDescription()}>Generate JD</button>
+              {errorFor('generate')}
+            </div>}
+            <label className="paste-jd">Paste job description<textarea ref={jdInputRef} aria-label="Paste job description" value={jdInput} disabled={!!busy} rows={6} placeholder="Paste the full job description here" onChange={event => setJDInput(event.target.value)} /></label>
             <button className="secondary" disabled={!!busy || !jdInput.trim()} onClick={usePastedJD}>Use pasted JD</button>
             {errorFor('jd')}
             {jd && <><div className="file-summary"><strong>{jd.name}</strong><span>{jd.pages ? `${jd.pages} pages · ` : ''}{jd.text.length.toLocaleString()} characters read</span></div><DocumentText document={jd} expanded />
