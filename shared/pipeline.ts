@@ -1,4 +1,4 @@
-export const stages = ['Applied', 'Interviewed', 'Shortlisted', 'Selected', 'Offered'] as const;
+export const stages = ['Applied', 'Interviewed', 'Shortlisted', 'Selected', 'Offered', 'Joined'] as const;
 export type Stage = typeof stages[number];
 export function cumulativeCounts(rows: {stage?: Stage}[]) {
   return stages.map((_, index) => rows.filter(row => stages.indexOf(row.stage ?? 'Applied') >= index).length);
